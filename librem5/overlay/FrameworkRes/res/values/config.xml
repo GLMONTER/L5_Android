@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Librem 5 framework config. Auto-brightness uses the VCNL4040 behind dark glass, so it reads
+     low: a lit room is only a few lux. Simple mapping: lux thresholds -> backlight (0-255). -->
+<resources>
+    <bool name="config_automatic_brightness_available">true</bool>
+
+    <!-- RGB status LED (lights HAL): battery colors are on by default; this enables the
+         notification light too. -->
+    <bool name="config_intrusiveNotificationLed">true</bool>
+
+    <!-- N lux thresholds -->
+    <integer-array name="config_autoBrightnessLevels">
+        <item>1</item>
+        <item>3</item>
+        <item>10</item>
+        <item>30</item>
+        <item>100</item>
+        <item>300</item>
+        <item>1000</item>
+        <item>3000</item>
+    </integer-array>
+    <!-- N+1 backlight values: below the first threshold, between each pair, above the last -->
+    <integer-array name="config_autoBrightnessLcdBacklightValues">
+        <item>12</item>
+        <item>28</item>
+        <item>48</item>
+        <item>72</item>
+        <item>100</item>
+        <item>140</item>
+        <item>185</item>
+        <item>230</item>
+        <item>255</item>
+    </integer-array>
+</resources>

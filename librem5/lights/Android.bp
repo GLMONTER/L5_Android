@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Librem 5 lights HAL: RGB status LED for battery / notification / attention lights.
+
+cc_binary {
+    name: "android.hardware.lights-service.librem5",
+    relative_install_path: "hw",
+    vendor: true,
+    init_rc: ["lights-librem5.rc"],
+    vintf_fragments: ["lights-librem5.xml"],
+    srcs: ["Lights.cpp"],
+    shared_libs: [
+        "android.hardware.light-V2-ndk",
+        "libbase",
+        "libbinder_ndk",
+    ],
+    cflags: ["-Wall", "-Werror"],
+}

@@ -1,0 +1,9 @@
+service vendor.lights-librem5 /vendor/bin/hw/android.hardware.lights-service.librem5
+    class hal
+    user system
+    group system
+    shutdown critical
+
+on boot
+    chown system system /sys/class/leds/rgb:status/brightness
+    chown system system /sys/class/leds/rgb:status/multi_intensity

@@ -112,3 +112,9 @@ PRODUCT_COPY_FILES += \
 
 # Power HAL with CPU/DRAM boosts on touch and app launch
 PRODUCT_PACKAGES += android.hardware.power-service.librem5
+
+# Lights HAL: RGB status LED (charging / battery low / notifications)
+PRODUCT_PACKAGES += android.hardware.lights-service.librem5
+
+# Framework overlay: adaptive brightness option + lux -> backlight curve
+PRODUCT_PACKAGES += Librem5FrameworkResOverlay

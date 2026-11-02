@@ -18,3 +18,4 @@
 /dev/block/by-name/super                                    u:object_r:super_block_device:s0
 /dev/block/by-name/userdata                                 u:object_r:userdata_block_device:s0
 /vendor/bin/hw/android\.hardware\.power-service\.librem5    u:object_r:hal_power_default_exec:s0
+/vendor/bin/hw/android\.hardware\.lights-service\.librem5   u:object_r:hal_light_default_exec:s0

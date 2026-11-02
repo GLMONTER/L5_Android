@@ -23,3 +23,6 @@ genfscon sysfs /devices/platform/soc@0/381f0040.usb-phy/extcon                  
 # DRAM controller devfreq (power HAL boosts min_freq)
 genfscon sysfs /class/devfreq                                                              u:object_r:sysfs_devfreq_dir:s0
 genfscon sysfs /devices/platform/soc@0/3d400000.memory-controller/devfreq                  u:object_r:sysfs_ddr_devfreq:s0
+
+# RGB status LED (lights HAL) and the camera flash LED
+genfscon sysfs /devices/platform/led-controller/leds                                       u:object_r:sysfs_leds:s0

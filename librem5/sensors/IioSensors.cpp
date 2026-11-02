@@ -271,8 +271,9 @@ void IioLightSensor::readEventPayload(EventPayload& payload) {
     double raw = 0, scale = 1;
     mDevice.readDouble("in_illuminance_raw", &raw);
     mDevice.readDouble("in_illuminance_scale", &scale);
-    // Round to whole lux so sensor noise doesn't turn every poll into an on-change event.
-    payload.set<EventPayload::Tag::scalar>(static_cast<float>(std::round(raw * scale)));
+    // Behind the dark glass a lit room is only a few lux, so keep 0.1 lux resolution; rounding
+    // still stops sensor noise from turning every poll into an on-change event.
+    payload.set<EventPayload::Tag::scalar>(static_cast<float>(std::round(raw * scale * 10) / 10));
 }
 
 // ---- VCNL4000 proximity (binary near/far) ----

@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// Librem 5 framework-res overlay: auto-brightness (VCNL4040 ambient light sensor).
+
+runtime_resource_overlay {
+    name: "Librem5FrameworkResOverlay",
+    vendor: true,
+    sdk_version: "current",
+}
