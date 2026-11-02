@@ -1,0 +1,3 @@
+# Our vendor properties come from vendor/build.prop, which vendor_init applies
+set_prop(vendor_init, vendor_hwc_prop)
+set_prop(vendor_init, vendor_sensors_prop)

@@ -1,0 +1,5 @@
+# GloDroid USB gadget HAL: adb functionfs and sys.usb.* control properties
+allow hal_usb_gadget_default functionfs:dir r_dir_perms;
+get_prop(hal_usb_gadget_default, usb_control_prop)
+# USB HAL reads charger state for the port
+allow hal_usb_default sysfs_batteryinfo:dir r_dir_perms;

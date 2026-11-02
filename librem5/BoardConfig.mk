@@ -31,6 +31,7 @@ BOARD_KERNEL_BASE := 0x40000000
 
 BOARD_VENDOR_KERNEL_MODULES := $(wildcard $(LIBREM5_KERNEL)/modules/*.ko)
 BOARD_VENDOR_KERNEL_MODULES_LOAD := $(shell cat $(LIBREM5_KERNEL)/modules.load)
+BOARD_VENDOR_KERNEL_MODULES_BLOCKLIST_FILE := $(BC_PATH)modules.blocklist
 
 BOARD_KERNEL_CMDLINE += \
     console=ttymxc0,115200 console=tty0 \

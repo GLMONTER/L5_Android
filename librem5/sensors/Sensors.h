@@ -49,6 +49,7 @@ class Sensors : public BnSensors, public ISensorsEventCallback {
           mHasWakeLock(false) {
         AddSensor<IioAccelSensor>();
         AddSensor<IioGyroSensor>();
+        AddSensor<IioMagnetometerSensor>();
         AddSensor<IioLightSensor>();
         AddSensor<IioProximitySensor>();
     }

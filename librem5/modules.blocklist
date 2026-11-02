@@ -1,0 +1,6 @@
+# Bluetooth (BCM4362 on UART4) must come up after the Wi-Fi firmware: brcmfmac's firmware
+# download resets the shared combo chip, which breaks a BT patch download in progress
+# ("BCM: Patch command fc4c failed (-110)") and leaves the BT ROM unpatched (link timeouts).
+# ueventd would load hci_uart as soon as the serdev device appears; init.librem5.rc loads it
+# once wlan0 exists instead.
+blocklist hci_uart

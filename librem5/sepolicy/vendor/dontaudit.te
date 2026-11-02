@@ -1,0 +1,5 @@
+# Lookups of properties that are not set (in-process vendor libraries probing ro.hardware.* /
+# ro.vendor.* names without a platform context, ). Denial has the
+# same result as "not set".
+dontaudit { appdomain surfaceflinger bootanim hal_graphics_allocator_default } vendor_default_prop:file { getattr map open read };
+dontaudit hal_graphics_allocator_default default_prop:file { getattr map open read };

@@ -88,6 +88,21 @@ class IioGyroSensor : public IioVec3Sensor {
     int mStillSamples = 0;
 };
 
+// LSM9DS1 magnetometer with online hard-iron calibration: the offset (speaker magnet etc., several
+// gauss here) is the midpoint of each axis' observed min/max. Accuracy stays UNRELIABLE until every
+// axis has swept a range consistent with Earth's field, which a figure-8 motion provides.
+class IioMagnetometerSensor : public IioVec3Sensor {
+  public:
+    IioMagnetometerSensor(int32_t sensorHandle, ISensorsEventCallback* callback);
+
+  protected:
+    void readEventPayload(EventPayload& payload) override;
+
+  private:
+    double mMin[3] = {1e9, 1e9, 1e9};
+    double mMax[3] = {-1e9, -1e9, -1e9};
+};
+
 class IioLightSensor : public OnChangeSensor {
   public:
     IioLightSensor(int32_t sensorHandle, ISensorsEventCallback* callback);

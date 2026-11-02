@@ -1,9 +1,14 @@
 # Librem 5 device init
 on early-init
     # Kernel modules (vendor_dlkm); brcmfmac needs brcmfmac_wcc loaded explicitly
-    exec u:r:vendor_modprobe:s0 -- /system/bin/modprobe -a -d /vendor_dlkm/lib/modules \
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -a -d /vendor_dlkm/lib/modules \
         --all=/vendor_dlkm/lib/modules/modules.load
 
 on boot
+    # Bluetooth after Wi-Fi: see modules.blocklist. wlan0 appears once brcmfmac's firmware is up.
+    wait /sys/class/net/wlan0 15
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -a -d /vendor_dlkm/lib/modules \
+        bluetooth btbcm hci_uart
+
     # Haptics: pwm-vibrator is exposed as a force-feedback input device
     chown system system /sys/class/leds/vibrator/brightness

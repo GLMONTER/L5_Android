@@ -1,0 +1,4 @@
+# Stable-C mapper (VINTF native instance "minigbm_gd") looked up by every graphics client
+mapper/minigbm_gd                                               u:object_r:hal_graphics_mapper_service:s0
+# Registered by the nonsecure gatekeeper APEX; labeled as its own service (as Cuttlefish does)
+android.hardware.security.sharedsecret.ISharedSecret/gatekeeper u:object_r:hal_gatekeeper_service:s0

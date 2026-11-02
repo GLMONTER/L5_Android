@@ -20,6 +20,7 @@
 
 #include <dirent.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -167,10 +168,16 @@ IioVec3Sensor::IioVec3Sensor(int32_t sensorHandle, ISensorsEventCallback* callba
 
 bool IioVec3Sensor::readVec3(double out[3]) {
     static const char* kAxes[3] = {"x", "y", "z"};
-    double scale = 0;
-    if (!mDevice.readDouble("in_" + mChannel + "_scale", &scale)) return false;
+    // Shared in_<chan>_scale, or per-axis in_<chan>_<axis>_scale (magnetometer)
+    double shared = 0;
+    const bool haveShared = mDevice.readDouble("in_" + mChannel + "_scale", &shared);
     double raw[3];
     for (int i = 0; i < 3; i++) {
+        double scale = shared;
+        if (!haveShared &&
+            !mDevice.readDouble("in_" + mChannel + "_" + kAxes[i] + "_scale", &scale)) {
+            return false;
+        }
         if (!mDevice.readDouble("in_" + mChannel + "_" + kAxes[i] + "_raw", &raw[i])) return false;
         raw[i] *= scale;
     }
@@ -233,6 +240,50 @@ void IioGyroSensor::readEventPayload(EventPayload& payload) {
             .y = static_cast<float>(w[1] - mBias[1]),
             .z = static_cast<float>(w[2] - mBias[2]),
             .status = ok ? SensorStatus::ACCURACY_MEDIUM : SensorStatus::UNRELIABLE,
+    };
+    payload.set<EventPayload::Tag::vec3>(vec3);
+}
+
+// ---- LSM9DS1 magnetometer ----
+
+IioMagnetometerSensor::IioMagnetometerSensor(int32_t sensorHandle, ISensorsEventCallback* callback)
+    : IioVec3Sensor(sensorHandle, callback, "lsm9ds1_magn", "magn", SensorType::MAGNETIC_FIELD,
+                    "LSM9DS1 Magnetometer", 1600.0f /* uT, +/-16 gauss */, 40) {
+    // Widest range: at the default +/-4 gauss the hard-iron offset saturates the z axis.
+    std::string scales = mDevice.readString("in_magn_scale_available");
+    if (size_t pos = scales.find_last_not_of(" "); pos != std::string::npos) {
+        std::string widest = scales.substr(scales.find_last_of(" ", pos) + 1);
+        if (!mDevice.writeString("in_magn_x_scale", widest)) {
+            ALOGW("could not set magnetometer scale %s", widest.c_str());
+        }
+    }
+    mSensorInfo.vendor = "STMicroelectronics";
+    mSensorInfo.resolution = 0.06f;      // uT (0.584 mgauss/LSB at +/-16 gauss)
+    mSensorInfo.power = 0.08f;
+    mSensorInfo.minDelayUs = 25 * 1000;  // 40 Hz
+}
+
+void IioMagnetometerSensor::readEventPayload(EventPayload& payload) {
+    constexpr double kGaussToUt = 100.0;
+    // Earth's field is 25-65 uT; a full sweep of an axis spans about twice that.
+    constexpr double kMinSpanUt = 50.0;
+    double v[3] = {0, 0, 0};
+    bool ok = readVec3(v);
+    bool calibrated = ok;
+    double out[3] = {0, 0, 0};
+    for (int i = 0; ok && i < 3; i++) {
+        v[i] *= kGaussToUt;
+        mMin[i] = std::min(mMin[i], v[i]);
+        mMax[i] = std::max(mMax[i], v[i]);
+        if (mMax[i] - mMin[i] < kMinSpanUt) calibrated = false;
+        out[i] = v[i] - (mMax[i] + mMin[i]) / 2;
+    }
+    EventPayload::Vec3 vec3 = {
+            .x = static_cast<float>(out[0]),
+            .y = static_cast<float>(out[1]),
+            .z = static_cast<float>(out[2]),
+            .status = !ok ? SensorStatus::UNRELIABLE
+                      : calibrated ? SensorStatus::ACCURACY_MEDIUM : SensorStatus::UNRELIABLE,
     };
     payload.set<EventPayload::Tag::vec3>(vec3);
 }

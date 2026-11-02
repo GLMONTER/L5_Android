@@ -98,9 +98,12 @@ PRODUCT_PACKAGES += android.hardware.sensors-service.librem5
 # LSM9DS1 axes, measured on an r4: accel reads -9.8 on the up axis for every orientation and the
 # gyro reads negative for positive (counter-clockwise) rotation about x and z, i.e. both report all
 # three axes negated. The device tree's matrix (1,0,0; 0,1,0; 0,0,-1) only fixes z.
+# Magnetometer (verified): a flat CCW turn rotates the field clockwise in the device frame and
+# the vertical field reads ~-36 uT screen-up (northern hemisphere). DT has 1,0,0;0,-1,0;0,0,-1.
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.sensors.lsm9ds1-imu_accel.mount_matrix=-1,0,0;0,-1,0;0,0,-1 \
-    ro.vendor.sensors.lsm9ds1-imu_gyro.mount_matrix=-1,0,0;0,-1,0;0,0,-1
+    ro.vendor.sensors.lsm9ds1-imu_gyro.mount_matrix=-1,0,0;0,-1,0;0,0,-1 \
+    ro.vendor.sensors.lsm9ds1_magn.mount_matrix=-1,0,0;0,1,0;0,0,-1
 
 # Bluetooth: BCM4362 on UART4 (kernel hci_uart/btbcm via DT serdev node, kernel patch 0003),
 # AOSP default AIDL HAL over the HCI user channel. GloDroid's bluetooth module stays off: its
@@ -118,3 +121,20 @@ PRODUCT_PACKAGES += android.hardware.lights-service.librem5
 
 # Framework overlay: adaptive brightness option + lux -> backlight curve
 PRODUCT_PACKAGES += Librem5FrameworkResOverlay
+
+# Bluetooth profiles (the stack starts a profile service only if its property is set; from
+# Cuttlefish's phone config, minus LE Audio/ASHA which need extra HAL support)
+PRODUCT_PRODUCT_PROPERTIES += \
+    bluetooth.device.class_of_device=90,2,12 \
+    bluetooth.profile.a2dp.source.enabled=true \
+    bluetooth.profile.avrcp.target.enabled=true \
+    bluetooth.profile.gatt.enabled=true \
+    bluetooth.profile.hfp.ag.enabled=true \
+    bluetooth.profile.hid.host.enabled=true \
+    bluetooth.profile.hid.device.enabled=true \
+    bluetooth.profile.map.server.enabled=true \
+    bluetooth.profile.mcp.server.enabled=true \
+    bluetooth.profile.opp.enabled=true \
+    bluetooth.profile.pan.nap.enabled=true \
+    bluetooth.profile.pan.panu.enabled=true \
+    bluetooth.profile.pbap.server.enabled=true

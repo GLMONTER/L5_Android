@@ -26,3 +26,20 @@ genfscon sysfs /devices/platform/soc@0/3d400000.memory-controller/devfreq       
 
 # RGB status LED (lights HAL) and the camera flash LED
 genfscon sysfs /devices/platform/led-controller/leds                                       u:object_r:sysfs_leds:s0
+
+# Wakeup sources (system_suspend reads their stats); prefix match covers wakeupN numbering
+genfscon sysfs /devices/platform/soc@0/38200000.usb/wakeup                                        u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc@0/30800000.bus/30a20000.i2c/i2c-0/0-0068/wakeup              u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc@0/30800000.bus/30a20000.i2c/i2c-0/0-003f/wakeup              u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc@0/30800000.bus/30a20000.i2c/i2c-0/0-003f/power_supply/tps6598x-source-psy-0-003f/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc@0/30800000.bus/30a50000.i2c/i2c-3/3-0036/power_supply/max170xx_battery/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc@0/30800000.bus/30a50000.i2c/i2c-3/3-006a/power_supply/bq25890-charger-0/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc@0/30000000.bus/30370000.snvs/30370000.snvs:snvs-powerkey/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc@0/30000000.bus/30370000.snvs/30370000.snvs:snvs-rtc-lp/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/soc@0/30000000.bus/30370000.snvs/30370000.snvs:snvs-rtc-lp/rtc/rtc1/alarmtimer.0.auto/wakeup u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/rfkill-hks/wakeup                                                u:object_r:sysfs_wakeup:s0
+genfscon sysfs /devices/platform/gpio-keys/wakeup                                                 u:object_r:sysfs_wakeup:s0
+
+# eMMC block device (storaged stats, init queue tuning) and the TPS6598x USB-C extcon
+genfscon sysfs /devices/platform/soc@0/30800000.bus/30b40000.mmc/mmc_host/mmc0/mmc0:0001/block    u:object_r:sysfs_devices_block:s0
+genfscon sysfs /devices/platform/soc@0/30800000.bus/30a20000.i2c/i2c-0/0-003f/extcon              u:object_r:sysfs_extcon:s0

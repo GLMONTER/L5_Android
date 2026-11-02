@@ -1,0 +1,42 @@
+From 41556718d276f09a1527936cde1fd56cc1ffcc70 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 16:06:30 -0600
+Subject: [PATCH] Bluetooth: hci_bcm: honour DT max-speed without a shutdown
+ GPIO
+
+Without a shutdown GPIO, bcm_serdev_probe() drops the operational speed
+back to the default 115200 baud. On the Librem 5 BT_REG_ON is driven by
+the Wi-Fi SDIO power sequence, so the DT cannot give a shutdown GPIO, and
+115200 baud (about 11.5 KB/s) is a third of what A2DP AAC needs: the
+stack drops two thirds of the media packets and headsets play only blips.
+
+Keep the operational speed when the DT asks for it with max-speed. Setup
+runs once per hci device, so the speed survives Bluetooth off/on.
+---
+ drivers/bluetooth/hci_bcm.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/bluetooth/hci_bcm.c b/drivers/bluetooth/hci_bcm.c
+index 0a54a7cf2..dc5507898 100644
+--- a/drivers/bluetooth/hci_bcm.c
++++ b/drivers/bluetooth/hci_bcm.c
+@@ -1538,7 +1538,15 @@ static int bcm_serdev_probe(struct serdev_device *serdev)
+ 	if (err)
+ 		return err;
+ 
+-	if (!bcmdev->shutdown) {
++	/*
++	 * Without a shutdown GPIO the chip cannot be reset to its default baud
++	 * rate, so stay there. A DT "max-speed" is an explicit request for the
++	 * operational speed though: setup runs once per hci device, and boards
++	 * where BT_REG_ON is shared with Wi-Fi (Librem 5) have no shutdown GPIO
++	 * but cannot stream A2DP at 115200 baud.
++	 */
++	if (!bcmdev->shutdown &&
++	    !device_property_present(&serdev->dev, "max-speed")) {
+ 		dev_warn(&serdev->dev,
+ 			 "No reset resource, using default baud rate\n");
+ 		bcmdev->oper_speed = bcmdev->init_speed;
+-- 
+2.55.0
+

@@ -1,0 +1,4 @@
+# minigbm's allocator shares a metadata "reserved region" with every gralloc client. On Google
+# devices that is ashmem; with memfd (memfd_class, kernel patch 0004) it is a memfd_file of the
+# allocator, which AOSP's policy has no rule for.
+allow domain hal_graphics_allocator_default:memfd_file { getattr map read write };

@@ -26,6 +26,3 @@ brcmfmac
 brcmfmac_wcc
 usb_storage
 uas
-bluetooth
-btbcm
-hci_uart

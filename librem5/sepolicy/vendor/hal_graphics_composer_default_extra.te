@@ -1,0 +1,8 @@
+# drm_hwcomposer checks the boot animation state (service.bootanim.exit)
+get_prop(hal_graphics_composer_default, bootanim_system_prop)
+
+# drm_hwcomposer allocates and maps buffers itself (allocator + stable-C mapper) and watches
+# DRM hotplug uevents
+hal_client_domain(hal_graphics_composer_default, hal_graphics_allocator)
+allow hal_graphics_composer_default hal_graphics_mapper_service:service_manager find;
+allow hal_graphics_composer_default self:netlink_kobject_uevent_socket setopt;

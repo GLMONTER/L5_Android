@@ -19,3 +19,15 @@
 /dev/block/by-name/userdata                                 u:object_r:userdata_block_device:s0
 /vendor/bin/hw/android\.hardware\.power-service\.librem5    u:object_r:hal_power_default_exec:s0
 /vendor/bin/hw/android\.hardware\.lights-service\.librem5   u:object_r:hal_light_default_exec:s0
+
+# Vendor libraries that system processes (SurfaceFlinger, apps, codecs) load in-process through
+# Mesa's EGL driver and the minigbm mapper (sphal namespace) and that neither AOSP nor GloDroid
+# label (AOSP covers libbase/libcutils/libutils/libz/libhidlbase/libhardware/libgralloctypes,
+# graphics.common@1.x, mapper@*, allocator-V2; GloDroid covers libgbm_mesa/libminigbm_gralloc_gd
+# and dri/libgallium_dri). Mesa 26 installs libgallium_dri.so directly in lib64/.
+/vendor/lib(64)?/libgallium_dri\.so                                          u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/libui\.so                                                   u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/libc\+\+\.so                                                u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/libaconfig_storage_read_api_cc\.so                          u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/android\.hardware\.graphics\.common-V7-ndk\.so              u:object_r:same_process_hal_file:s0
+/vendor/lib(64)?/android\.hardware\.graphics\.allocator@[234]\.0\.so         u:object_r:same_process_hal_file:s0

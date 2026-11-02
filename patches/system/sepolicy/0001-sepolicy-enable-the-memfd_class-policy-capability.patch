@@ -1,0 +1,28 @@
+From ea9d21a72eb39fbd259619093de35cd6d3fbffba Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 14:51:29 -0600
+Subject: [PATCH] sepolicy: enable the memfd_class policy capability
+
+Kernels without ashmem (upstream Linux) need memfd for shared memory. Without
+memfd_class, memfds are labeled as tmpfs files of their creator and the
+memfd_file rules in this policy never apply, so cross-process shared memory
+(audio, graphics, sensors FMQs) is denied in enforcing mode.
+
+Change-Id: I18a48ae1221aeca0401de0169ce43cb598f7067e
+---
+ private/policy_capabilities | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/private/policy_capabilities b/private/policy_capabilities
+index d9c2721..c9d9a87 100644
+--- a/private/policy_capabilities
++++ b/private/policy_capabilities
+@@ -24,3 +24,8 @@ policycap functionfs_seclabel;
+ 
+ # Enable extended permissions for netlink sockets.
+ policycap netlink_xperm;
++
++# Label memfds with their creator's context in the memfd_file class (kernel 6.19+ or a
++# backport of "memfd,selinux: call security_inode_init_security_anon()"). Needed when
++# memfd replaces ashmem (sys.use_memfd=true on kernels without ashmem).
++policycap memfd_class;
