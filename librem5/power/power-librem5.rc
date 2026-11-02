@@ -1,0 +1,11 @@
+service vendor.power-librem5 /vendor/bin/hw/android.hardware.power-service.librem5
+    class hal
+    user system
+    group system
+
+# Frequency floors written by the power HAL (Booster)
+on boot
+    chown system system /sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq
+    chmod 0664 /sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq
+    chown system system /sys/class/devfreq/3d400000.memory-controller/min_freq
+    chmod 0664 /sys/class/devfreq/3d400000.memory-controller/min_freq

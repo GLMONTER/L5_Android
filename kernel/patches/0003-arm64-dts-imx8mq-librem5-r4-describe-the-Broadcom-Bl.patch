@@ -1,0 +1,35 @@
+From 1e8a908ff98452ae70950f3e93a0ecc8db853314 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 13:36:47 -0600
+Subject: [PATCH 3/3] arm64: dts: imx8mq-librem5-r4: describe the Broadcom
+ Bluetooth on UART4
+
+The BCM4362 Bluetooth part of the Wi-Fi/BT combo sits on UART4. Add a serdev
+child so hci_uart/btbcm bring up hci0 and load brcm/BCM4362A2.hcd from the
+kernel, at the 1500000 baud PureOS uses with hciattach. BT_REG_ON is part of
+the Wi-Fi SDIO pwrseq, so no power GPIOs are listed.
+---
+ arch/arm64/boot/dts/freescale/imx8mq-librem5-r4.dts | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/freescale/imx8mq-librem5-r4.dts b/arch/arm64/boot/dts/freescale/imx8mq-librem5-r4.dts
+index 70dec8b80..532b4c97e 100644
+--- a/arch/arm64/boot/dts/freescale/imx8mq-librem5-r4.dts
++++ b/arch/arm64/boot/dts/freescale/imx8mq-librem5-r4.dts
+@@ -29,3 +29,16 @@ &max17055 {
+ &proximity {
+ 	proximity-near-level = <7>;
+ };
++
++/*
++ * Broadcom BCM4362 Bluetooth on UART4. BT_REG_ON is driven by the Wi-Fi SDIO pwrseq, so the
++ * chip is powered whenever Wi-Fi is; no GPIOs here. Lets hci_uart/btbcm bring up hci0 and load
++ * brcm/BCM4362A2.hcd in the kernel (PureOS does the same from userspace with hciattach at
++ * 1500000 baud). Needed by Android's default Bluetooth HAL, which uses an HCI user channel.
++ */
++&uart4 {
++	bluetooth {
++		compatible = "brcm,bcm4345c5";
++		max-speed = <1500000>;
++	};
++};

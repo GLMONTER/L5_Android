@@ -1,0 +1,9 @@
+# Librem 5 device init
+on early-init
+    # Kernel modules (vendor_dlkm); brcmfmac needs brcmfmac_wcc loaded explicitly
+    exec u:r:vendor_modprobe:s0 -- /system/bin/modprobe -a -d /vendor_dlkm/lib/modules \
+        --all=/vendor_dlkm/lib/modules/modules.load
+
+on boot
+    # Haptics: pwm-vibrator is exposed as a force-feedback input device
+    chown system system /sys/class/leds/vibrator/brightness

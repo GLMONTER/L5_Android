@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: Apache-2.0
+// Librem 5 sensors HAL: AOSP's default AIDL sensors HAL plumbing (Sensors/Sensor, copied from
+// hardware/interfaces/sensors/aidl/default) with IIO-backed sensors instead of simulated ones.
+
+cc_binary {
+    name: "android.hardware.sensors-service.librem5",
+    relative_install_path: "hw",
+    vendor: true,
+    init_rc: ["sensors-librem5.rc"],
+    vintf_fragments: ["sensors-librem5.xml"],
+    srcs: [
+        "main.cpp",
+        "Sensors.cpp",
+        "Sensor.cpp",
+        "IioSensors.cpp",
+    ],
+    shared_libs: [
+        "android.hardware.sensors-V3-ndk",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "libfmq",
+        "liblog",
+        "libpower",
+        "libutils",
+    ],
+    static_libs: [
+        "android.hardware.common-V2-ndk",
+        "android.hardware.common.fmq-V1-ndk",
+    ],
+    cflags: ["-Wall", "-Werror"],
+}

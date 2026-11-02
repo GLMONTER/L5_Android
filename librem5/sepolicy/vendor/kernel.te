@@ -1,0 +1,2 @@
+# Broadcom Bluetooth patch firmware loaded by btbcm from /vendor/firmware/brcm
+allow kernel vendor_file:system firmware_load;

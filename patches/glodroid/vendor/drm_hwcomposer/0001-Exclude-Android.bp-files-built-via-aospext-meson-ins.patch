@@ -1,0 +1,29 @@
+From ddf61baa2367bd39094cb19a89be9e6492313ea6 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 13:36:48 -0600
+Subject: [PATCH 1/2] Exclude Android.bp files, built via aospext/meson instead
+
+Rename Android.bp -> Android.bp_ so Soong doesn't see duplicate modules
+next to the copy in external/. Same approach as GloDroid's drm_hwcomposer
+patch 0010.
+---
+ Android.bp => Android.bp_           | 0
+ backend/{Android.bp => Android.bp_} | 0
+ tests/{Android.bp => Android.bp_}   | 0
+ 3 files changed, 0 insertions(+), 0 deletions(-)
+ rename Android.bp => Android.bp_ (100%)
+ rename backend/{Android.bp => Android.bp_} (100%)
+ rename tests/{Android.bp => Android.bp_} (100%)
+
+diff --git a/Android.bp b/Android.bp_
+similarity index 100%
+rename from Android.bp
+rename to Android.bp_
+diff --git a/backend/Android.bp b/backend/Android.bp_
+similarity index 100%
+rename from backend/Android.bp
+rename to backend/Android.bp_
+diff --git a/tests/Android.bp b/tests/Android.bp_
+similarity index 100%
+rename from tests/Android.bp
+rename to tests/Android.bp_

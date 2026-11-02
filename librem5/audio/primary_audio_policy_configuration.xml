@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Librem 5 primary module (AOSP default AIDL HAL, ALSA card 0 = WM8962).
+     Device types map to mixer_paths.xml paths in PrimaryRoute:
+     Speaker -> speaker, Earpiece -> earpiece, Wired Headset/Headphones -> headphones,
+     Built-In Mic -> builtin-mic, Wired Headset Mic -> headset-mic.
+     Telephony ports are stubs until the BM818 modem audio (ALSA card 1) is wired up. -->
+<module name="primary" halVersion="3.0">
+    <attachedDevices>
+        <item>Speaker</item>
+        <item>Earpiece</item>
+        <item>Built-In Mic</item>
+        <item>Telephony Tx</item>
+        <item>Telephony Rx</item>
+    </attachedDevices>
+    <defaultOutputDevice>Speaker</defaultOutputDevice>
+    <mixPorts>
+        <mixPort name="primary output" role="source" flags="AUDIO_OUTPUT_FLAG_PRIMARY">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="48000"
+                     channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+        </mixPort>
+        <mixPort name="primary input" role="sink">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="8000 16000 48000"
+                     channelMasks="AUDIO_CHANNEL_IN_MONO AUDIO_CHANNEL_IN_STEREO"/>
+        </mixPort>
+        <mixPort name="telephony_tx" role="source">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="8000 16000 48000"
+                     channelMasks="AUDIO_CHANNEL_OUT_MONO AUDIO_CHANNEL_OUT_STEREO"/>
+        </mixPort>
+        <mixPort name="telephony_rx" role="sink">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="8000 16000 48000"
+                     channelMasks="AUDIO_CHANNEL_IN_MONO AUDIO_CHANNEL_IN_STEREO"/>
+        </mixPort>
+    </mixPorts>
+    <devicePorts>
+        <devicePort tagName="Speaker" type="AUDIO_DEVICE_OUT_SPEAKER" role="sink">
+        </devicePort>
+        <devicePort tagName="Earpiece" type="AUDIO_DEVICE_OUT_EARPIECE" role="sink">
+        </devicePort>
+        <devicePort tagName="Wired Headset" type="AUDIO_DEVICE_OUT_WIRED_HEADSET" role="sink">
+        </devicePort>
+        <devicePort tagName="Wired Headphones" type="AUDIO_DEVICE_OUT_WIRED_HEADPHONE" role="sink">
+        </devicePort>
+        <devicePort tagName="Telephony Tx" type="AUDIO_DEVICE_OUT_TELEPHONY_TX" role="sink">
+        </devicePort>
+
+        <devicePort tagName="Built-In Mic" type="AUDIO_DEVICE_IN_BUILTIN_MIC" address="bottom" role="source">
+        </devicePort>
+        <devicePort tagName="Wired Headset Mic" type="AUDIO_DEVICE_IN_WIRED_HEADSET" role="source">
+        </devicePort>
+        <devicePort tagName="Telephony Rx" type="AUDIO_DEVICE_IN_TELEPHONY_RX" role="source">
+        </devicePort>
+    </devicePorts>
+    <routes>
+        <route type="mix" sink="Speaker" sources="primary output"/>
+        <route type="mix" sink="Earpiece" sources="primary output"/>
+        <route type="mix" sink="Wired Headset" sources="primary output"/>
+        <route type="mix" sink="Wired Headphones" sources="primary output"/>
+        <route type="mix" sink="primary input" sources="Built-In Mic,Wired Headset Mic"/>
+
+        <route type="mix" sink="telephony_rx" sources="Telephony Rx"/>
+        <route type="mix" sink="Telephony Tx" sources="telephony_tx"/>
+    </routes>
+</module>

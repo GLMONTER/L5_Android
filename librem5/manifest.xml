@@ -1,0 +1,4 @@
+<!-- Librem 5 device manifest. target-level 8 = FCM for PRODUCT_SHIPPING_API_LEVEL 34 (set by GloDroid common).
+     composer3 V5 is declared by glodroid/configuration (local branch librem5). -->
+<manifest version="1.0" type="device" target-level="8">
+</manifest>

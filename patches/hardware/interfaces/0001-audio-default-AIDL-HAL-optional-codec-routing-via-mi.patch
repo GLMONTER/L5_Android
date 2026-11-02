@@ -1,0 +1,227 @@
+From c5002ac5f634dd24ef015ab2226fa1fdc1700a34 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 13:36:48 -0600
+Subject: [PATCH] audio: default AIDL HAL: optional codec routing via
+ mixer_paths.xml
+
+If /vendor/etc/mixer_paths.xml (audio_route format) is present, the primary
+module applies its top-level controls at startup and switches to the path
+matching the connected device type when a primary stream changes device
+(speaker, earpiece, headphones, builtin-mic, headset-mic). Without the file
+behaviour is unchanged. Lets boards with a plain ALSA codec, such as the
+Librem 5 (WM8962), use the default HAL instead of a custom one.
+
+Change-Id: I7b69855886f8da6573702d4f40a65c0dba7adc11
+---
+ audio/aidl/default/Android.bp                |  2 +
+ audio/aidl/default/primary/PrimaryRoute.cpp  | 95 ++++++++++++++++++++
+ audio/aidl/default/primary/PrimaryRoute.h    | 49 ++++++++++
+ audio/aidl/default/primary/StreamPrimary.cpp |  6 +-
+ 4 files changed, 151 insertions(+), 1 deletion(-)
+ create mode 100644 audio/aidl/default/primary/PrimaryRoute.cpp
+ create mode 100644 audio/aidl/default/primary/PrimaryRoute.h
+
+diff --git a/audio/aidl/default/Android.bp b/audio/aidl/default/Android.bp
+index f46c2ee..3515c98 100644
+--- a/audio/aidl/default/Android.bp
++++ b/audio/aidl/default/Android.bp
+@@ -14,6 +14,7 @@ cc_defaults {
+     shared_libs: [
+         "libalsautilsv2",
+         "libaudio_aidl_conversion_common_ndk",
++        "libaudioroutev2",
+         "libaudioaidlcommon",
+         "libaudioutils",
+         "libbase",
+@@ -76,6 +77,7 @@ cc_library {
+         "bluetooth/StreamBluetooth.cpp",
+         "deprecated/StreamSwitcher.cpp",
+         "primary/PrimaryMixer.cpp",
++        "primary/PrimaryRoute.cpp",
+         "primary/StreamPrimary.cpp",
+         "r_submix/ModuleRemoteSubmix.cpp",
+         "r_submix/SubmixRoute.cpp",
+diff --git a/audio/aidl/default/primary/PrimaryRoute.cpp b/audio/aidl/default/primary/PrimaryRoute.cpp
+new file mode 100644
+index 0000000..1dc0182
+--- /dev/null
++++ b/audio/aidl/default/primary/PrimaryRoute.cpp
+@@ -0,0 +1,95 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#define LOG_TAG "AHAL_PrimaryRoute"
++
++#include <unistd.h>
++
++#include <android-base/logging.h>
++#include <audio_route/audio_route.h>
++
++#include "PrimaryMixer.h"
++#include "PrimaryRoute.h"
++
++using aidl::android::media::audio::common::AudioDevice;
++using aidl::android::media::audio::common::AudioDeviceType;
++
++namespace aidl::android::hardware::audio::core::primary {
++
++namespace {
++
++constexpr char kMixerPathsFile[] = "/vendor/etc/mixer_paths.xml";
++
++std::string pathForDevice(bool isInput, const AudioDevice& device) {
++    switch (device.type.type) {
++        case AudioDeviceType::OUT_SPEAKER:
++            return "speaker";
++        case AudioDeviceType::OUT_SPEAKER_EARPIECE:
++            return "earpiece";
++        case AudioDeviceType::OUT_HEADPHONE:
++        case AudioDeviceType::OUT_HEADSET:
++            return "headphones";
++        case AudioDeviceType::IN_MICROPHONE:
++        case AudioDeviceType::IN_MICROPHONE_BACK:
++            return "builtin-mic";
++        case AudioDeviceType::IN_HEADSET:
++            return "headset-mic";
++        default:
++            LOG(DEBUG) << __func__ << ": no path for " << (isInput ? "input" : "output")
++                       << " device " << device.toString();
++            return "";
++    }
++}
++
++}  // namespace
++
++PrimaryRoute& PrimaryRoute::getInstance() {
++    static PrimaryRoute instance;
++    return instance;
++}
++
++PrimaryRoute::PrimaryRoute() {
++    if (access(kMixerPathsFile, R_OK) != 0) {
++        LOG(INFO) << __func__ << ": " << kMixerPathsFile << " not present, routing disabled";
++        return;
++    }
++    mRoute = audio_route_init(PrimaryMixer::kAlsaCard, kMixerPathsFile);
++    if (mRoute == nullptr) {
++        LOG(ERROR) << __func__ << ": failed to load " << kMixerPathsFile;
++        return;
++    }
++    LOG(INFO) << __func__ << ": loaded " << kMixerPathsFile << " for card "
++              << PrimaryMixer::kAlsaCard;
++}
++
++void PrimaryRoute::select(bool isInput, const std::optional<AudioDevice>& device) {
++    if (mRoute == nullptr) return;
++    std::lock_guard l(mLock);
++    std::string& current = isInput ? mInputPath : mOutputPath;
++    std::string next = device.has_value() ? pathForDevice(isInput, *device) : "";
++    if (next == current) return;
++    if (!current.empty()) audio_route_reset_path(mRoute, current.c_str());
++    if (!next.empty() && audio_route_apply_path(mRoute, next.c_str()) != 0) {
++        LOG(WARNING) << __func__ << ": no path \"" << next << "\" in " << kMixerPathsFile;
++        next.clear();
++    }
++    audio_route_update_mixer(mRoute);
++    LOG(INFO) << __func__ << ": " << (isInput ? "input" : "output") << " path \"" << current
++              << "\" -> \"" << next << "\"";
++    current = next;
++}
++
++}  // namespace aidl::android::hardware::audio::core::primary
+diff --git a/audio/aidl/default/primary/PrimaryRoute.h b/audio/aidl/default/primary/PrimaryRoute.h
+new file mode 100644
+index 0000000..6571e3c
+--- /dev/null
++++ b/audio/aidl/default/primary/PrimaryRoute.h
+@@ -0,0 +1,49 @@
++/*
++ * Copyright (C) 2026 The Android Open Source Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++#include <mutex>
++#include <optional>
++#include <string>
++
++#include <aidl/android/media/audio/common/AudioDevice.h>
++
++struct audio_route;
++
++namespace aidl::android::hardware::audio::core::primary {
++
++// Optional codec routing for the primary module: if /vendor/etc/mixer_paths.xml exists
++// (audio_route format), its top-level controls are applied at startup and the path that
++// matches the connected device type is applied whenever a primary stream changes device.
++// Path names: "speaker", "earpiece", "headphones", "builtin-mic", "headset-mic".
++class PrimaryRoute {
++  public:
++    static PrimaryRoute& getInstance();
++
++    void select(bool isInput,
++                const std::optional<::aidl::android::media::audio::common::AudioDevice>& device);
++
++  private:
++    PrimaryRoute();
++
++    std::mutex mLock;
++    struct audio_route* mRoute = nullptr;
++    std::string mOutputPath;
++    std::string mInputPath;
++};
++
++}  // namespace aidl::android::hardware::audio::core::primary
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index ac0d302..9e61920 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -25,6 +25,7 @@
+ #include <error/Result.h>
+ #include <error/expected_utils.h>
+ 
++#include "PrimaryRoute.h"
+ #include "core-impl/StreamPrimary.h"
+ 
+ using aidl::android::hardware::audio::common::SinkMetadata;
+@@ -148,11 +149,14 @@ ndk::ScopedAStatus StreamPrimary::setConnectedDevices(const ConnectedDevices& de
+                    << devices.size();
+         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
+     }
++    const bool useStubDriver = devices.empty() || useStubStream(mIsInput, devices[0]);
+     {
+-        const bool useStubDriver = devices.empty() || useStubStream(mIsInput, devices[0]);
+         std::lock_guard l(mLock);
+         mAlsaDeviceId = useStubDriver ? kStubDeviceId : getCardAndDeviceId(devices);
+     }
++    if (!useStubDriver) {
++        primary::PrimaryRoute::getInstance().select(mIsInput, devices[0]);
++    }
+     if (!devices.empty()) {
+         auto streamDataProcessor = getContext().getStreamDataProcessor().lock();
+         if (streamDataProcessor != nullptr) {

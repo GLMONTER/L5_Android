@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+// Librem 5 power HAL: AOSP example power HAL (hardware/interfaces/power/aidl/default) plus
+// Booster (CPU/DRAM frequency floors on touch and app launch).
+
+cc_binary {
+    name: "android.hardware.power-service.librem5",
+    defaults: ["android.hardware.power-ndk_shared"],
+    relative_install_path: "hw",
+    init_rc: ["power-librem5.rc"],
+    vintf_fragments: ["power-librem5.xml"],
+    vendor: true,
+    shared_libs: [
+        "android.hardware.common-V2-ndk",
+        "android.hardware.common.fmq-V1-ndk",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "libfmq",
+        "libutils",
+    ],
+    srcs: [
+        "main.cpp",
+        "Power.cpp",
+        "PowerHintSession.cpp",
+        "Booster.cpp",
+    ],
+    cflags: ["-Wall", "-Werror"],
+}

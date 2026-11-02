@@ -1,0 +1,12 @@
+gbm_mesa: include <functional> for std::function (newer libc++ no longer pulls it in)
+
+--- a/gbm_mesa_driver/gbm_mesa_internals.cpp
++++ b/gbm_mesa_driver/gbm_mesa_internals.cpp
+@@ -30,6 +30,7 @@
+ #include <cutils/properties.h>
+ #include <dlfcn.h>
+ #include <errno.h>
++#include <functional>
+ #include <fcntl.h>
+ #include <gbm.h>
+ #include <glob.h>

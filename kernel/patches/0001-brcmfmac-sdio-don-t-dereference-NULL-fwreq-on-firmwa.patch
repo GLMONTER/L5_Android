@@ -1,0 +1,30 @@
+From 6243e20dca7aefeca4ebd061dfbbd03be5620ce9 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 13:36:47 -0600
+Subject: [PATCH 1/3] brcmfmac: sdio: don't dereference NULL fwreq on firmware
+ load failure
+
+brcmf_fw_request_done() frees the request and calls the done callback with
+fwreq == NULL when a firmware file can't be loaded. The stale-request guard
+in brcmf_sdio_firmware_callback() dereferenced fwreq->driver_data before the
+error check, oopsing in a workqueue on Librem 5 r4 (BCM43752) whenever
+brcm/brcmfmac43752-sdio.bin is missing. Let a NULL fwreq fall through to
+the normal error path, as in mainline.
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+index 979a74ee6..fde7b1374 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+@@ -4225,7 +4225,8 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
+ 
+ 	brcmf_dbg(TRACE, "Enter: dev=%s, err=%d\n", dev_name(dev), err);
+ 
+-	if (!bus_if || bus_if->bus_priv.sdio != fwreq->driver_data) {
++	/* fwreq is NULL when the firmware request failed (brcmf_fw_request_done) */
++	if (!bus_if || (fwreq && bus_if->bus_priv.sdio != fwreq->driver_data)) {
+ 		kfree(fwreq);
+ 		return;
+ 	}

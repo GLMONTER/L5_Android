@@ -1,0 +1,101 @@
+From 8151689a615cbf972462059ed426f17e1fe4d1c7 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 13:36:48 -0600
+Subject: [PATCH 2/2] drm: optionally scan out ARGB8888 as XRGB8888
+
+ro.vendor.hwc.drm.argb_as_xrgb=1 makes DrmFbImporter create ARGB8888
+framebuffers as XRGB8888 (identical memory layout) and lets planes that
+support XRGB8888 accept ARGB8888 layers. For display controllers whose
+primary plane has no alpha format, such as the i.MX8MQ LCDIF (mxsfb),
+which only takes XRGB8888/RGB565. Only safe with overlay planes disabled.
+---
+ drm/DrmFbImporter.cpp | 9 +++++++--
+ drm/DrmPlane.cpp      | 3 +++
+ utils/properties.cpp  | 7 +++++++
+ utils/properties.h    | 1 +
+ 4 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/drm/DrmFbImporter.cpp b/drm/DrmFbImporter.cpp
+index 6893b16..be6fd5b 100644
+--- a/drm/DrmFbImporter.cpp
++++ b/drm/DrmFbImporter.cpp
+@@ -35,6 +35,7 @@
+ #include "bufferinfo/BufferInfo.h"
+ #include "drm/DrmDevice.h"
+ #include "utils/log.h"
++#include "utils/properties.h"
+ 
+ namespace android::drm_hwcomposer {
+ 
+@@ -76,14 +77,18 @@ auto DrmFbIdHandle::CreateInstance(BufferInfo *bo, GemHandle first_gem_handle,
+     return local;
+   }
+ 
++  uint32_t fb_format = bo->format;
++  if (fb_format == DRM_FORMAT_ARGB8888 && Properties::ArgbAsXrgb())
++    fb_format = DRM_FORMAT_XRGB8888;
++
+   /* Create framebuffer object */
+   if (!has_modifiers) {
+-    err = drmModeAddFB2(*drm.GetFd(), bo->width, bo->height, bo->format,
++    err = drmModeAddFB2(*drm.GetFd(), bo->width, bo->height, fb_format,
+                         local->gem_handles_.data(), &bo->pitches[0],
+                         &bo->offsets[0], &local->fb_id_, 0);
+   } else {
+     err = drmModeAddFB2WithModifiers(*drm.GetFd(), bo->width, bo->height,
+-                                     bo->format, local->gem_handles_.data(),
++                                     fb_format, local->gem_handles_.data(),
+                                      &bo->pitches[0], &bo->offsets[0],
+                                      &bo->modifiers[0], &local->fb_id_,
+                                      DRM_MODE_FB_MODIFIERS);
+diff --git a/drm/DrmPlane.cpp b/drm/DrmPlane.cpp
+index 31ef47e..e5b5874 100644
+--- a/drm/DrmPlane.cpp
++++ b/drm/DrmPlane.cpp
+@@ -16,6 +16,7 @@
+ 
+ #include "DrmPlane.h"
+ 
++#include <drm/drm_fourcc.h>
+ #include <drm/drm_mode.h>
+ #include <xf86drmMode.h>
+ 
+@@ -370,6 +371,8 @@ bool DrmPlane::IsValidForLayer(const LayerData *layer) {
+ }
+ 
+ bool DrmPlane::IsFormatSupported(uint32_t format) const {
++  if (format == DRM_FORMAT_ARGB8888 && Properties::ArgbAsXrgb())
++    format = DRM_FORMAT_XRGB8888;
+   return std::find(std::begin(formats_), std::end(formats_), format) !=
+          std::end(formats_);
+ }
+diff --git a/utils/properties.cpp b/utils/properties.cpp
+index 8ef874b..facc214 100644
+--- a/utils/properties.cpp
++++ b/utils/properties.cpp
+@@ -177,6 +177,13 @@ auto Properties::UseOverlayPlanes() -> bool {
+   return (property_get_bool("ro.vendor.hwc.use_overlay_planes", 1) != 0);
+ }
+ 
++/* Scan out ARGB8888 buffers as XRGB8888 (same memory layout, alpha ignored) for display
++ * controllers whose primary plane has no alpha formats (e.g. i.MX8MQ LCDIF/mxsfb). Only
++ * safe with overlay planes disabled, since the alpha channel is dropped. */
++auto Properties::ArgbAsXrgb() -> bool {
++  return (property_get_bool("ro.vendor.hwc.drm.argb_as_xrgb", 0) != 0);
++}
++
+ auto Properties::ScaleWithGpu() -> bool {
+   return (property_get_bool("vendor.hwc.drm.scale_with_gpu", 0) != 0);
+ }
+diff --git a/utils/properties.h b/utils/properties.h
+index 2ee2b5d..ac7473f 100644
+--- a/utils/properties.h
++++ b/utils/properties.h
+@@ -31,6 +31,7 @@ class Properties {
+   static auto IsPresentFenceNotReliable() -> bool;
+   static auto InternalDisplayNames() -> std::string;
+   static auto UseOverlayPlanes() -> bool;
++  static auto ArgbAsXrgb() -> bool;
+   static auto ScaleWithGpu() -> bool;
+   static auto EnableVirtualDisplay() -> bool;
+   static auto EnableExternalDisplays() -> bool;

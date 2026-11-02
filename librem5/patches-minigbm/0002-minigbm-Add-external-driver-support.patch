@@ -1,0 +1,63 @@
+diff --git a/cros_gralloc/cros_gralloc_driver.cc b/cros_gralloc/cros_gralloc_driver.cc
+index 550f75a..86c345e 100644
+--- a/cros_gralloc/cros_gralloc_driver.cc
++++ b/cros_gralloc/cros_gralloc_driver.cc
+@@ -91,6 +91,7 @@ std::shared_ptr<cros_gralloc_driver> cros_gralloc_driver::get_instance()
+ 	return s_instance;
+ }
+ 
++#ifndef DRV_EXTERNAL
+ static struct driver *init_try_node(int idx, char const *str)
+ {
+ 	int fd;
+@@ -148,11 +149,21 @@ static struct driver *init_try_nodes()
+ 	return nullptr;
+ }
+ 
++#else
++
++static struct driver *init_try_nodes()
++{
++	return drv_create(-1);
++}
++
++#endif
++
+ static void drv_destroy_and_close(struct driver *drv)
+ {
+ 	int fd = drv_get_fd(drv);
+ 	drv_destroy(drv);
+-	close(fd);
++	if (fd != -1)
++		close(fd);
+ }
+ 
+ cros_gralloc_driver::cros_gralloc_driver() : drv_(init_try_nodes(), drv_destroy_and_close)
+diff --git a/drv.c b/drv.c
+index cf3b78b..d656599 100644
+--- a/drv.c
++++ b/drv.c
+@@ -28,6 +28,15 @@
+ #include "drv_priv.h"
+ #include "util.h"
+ 
++#ifdef DRV_EXTERNAL
++extern struct backend *init_external_backend();
++
++static const struct backend *drv_get_backend(int fd)
++{
++	return init_external_backend();
++}
++#else
++
+ #ifdef DRV_AMDGPU
+ extern const struct backend backend_amdgpu;
+ #endif
+@@ -108,6 +117,7 @@ static const struct backend *drv_get_backend(int fd)
+ 	drmFreeVersion(drm_version);
+ 	return NULL;
+ }
++#endif
+ 
+ struct driver *drv_create(int fd)
+ {

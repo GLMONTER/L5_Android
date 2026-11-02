@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Librem 5: modules for AOSP's default AIDL audio HAL (com.android.hardware.audio).
+     The HAL creates one IModule per <module> here ("primary" -> IModule/default);
+     with no file at all it registers none and audioserver/system_server hang.
+     primary_audio_policy_configuration.xml is Cuttlefish's (stub streams) until the
+     WM8962 codec gets a real HAL. -->
+<audioPolicyConfiguration version="7.0" xmlns:xi="http://www.w3.org/2001/XInclude">
+    <globalConfiguration speaker_drc_enabled="false"/>
+    <modules>
+        <xi:include href="primary_audio_policy_configuration.xml"/>
+        <xi:include href="r_submix_audio_policy_configuration.xml"/>
+        <xi:include href="bluetooth_with_le_audio_policy_configuration_7_0.xml"/>
+    </modules>
+    <xi:include href="audio_policy_volumes.xml"/>
+    <xi:include href="default_volume_tables.xml"/>
+</audioPolicyConfiguration>

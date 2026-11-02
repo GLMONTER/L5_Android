@@ -1,0 +1,18 @@
+# Librem 5 device nodes (imported by GloDroid's common ueventd.rc)
+
+# Hantro VPU (G1/G2 decoders) via V4L2
+/dev/video*               0660   system     camera
+/dev/media*               0660   system     camera
+
+# IIO sensors on i2c-1 (sensors HAL runs as system): proximity/light, LSM9DS1 IMU + magnetometer
+/dev/iio:device*          0660   system     system
+/sys/devices/platform/soc@0/30800000.bus/30a30000.i2c/i2c-1/1-006a/iio:device*  sampling_frequency  0664  system  system
+/sys/devices/platform/soc@0/30800000.bus/30a30000.i2c/i2c-1/1-001e/iio:device*  sampling_frequency  0664  system  system
+/sys/devices/platform/soc@0/30800000.bus/30a30000.i2c/i2c-1/1-001e/iio:device*  in_magn_x_scale     0664  system  system
+/sys/devices/platform/soc@0/30800000.bus/30a30000.i2c/i2c-1/1-0060/iio:device*  in_illuminance_integration_time  0664  system  system
+
+# Panel backlight (LM3692X): the composer (hwc3, uid system) sets brightness here
+/sys/devices/platform/backlight-dsi/backlight/backlight-dsi  brightness  0664  system  system
+
+# rfkill: the default Bluetooth HAL (user bluetooth) toggles the BT radio through it
+/dev/rfkill               0660   root       bluetooth

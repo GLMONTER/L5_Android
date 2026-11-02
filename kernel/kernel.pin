@@ -1,0 +1,5 @@
+# Purism Librem 5 kernel (pureos/latest at the time of the port), patched with kernel/patches/
+KERNEL_REPO=https://source.puri.sm/Librem5/linux.git
+KERNEL_BRANCH=pureos/latest
+KERNEL_COMMIT=a2a805fc61fc4d71d21f302bf6c3007cafa4f17d
+KERNEL_DEFCONFIG_BASE=kernel/config-6.18.0-1-librem5

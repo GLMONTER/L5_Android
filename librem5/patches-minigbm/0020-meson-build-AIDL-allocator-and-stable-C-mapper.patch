@@ -1,0 +1,79 @@
+diff -ruN '--exclude=.git' mg2-base/cros_gralloc/aidl/Allocator.cpp mg2/cros_gralloc/aidl/Allocator.cpp
+--- a/cros_gralloc/aidl/Allocator.cpp	2026-11-02 07:17:56.369715653 -0600
++++ b/cros_gralloc/aidl/Allocator.cpp	2026-11-02 07:17:56.373619736 -0600
+@@ -240,7 +240,7 @@
+ }
+ 
+ ndk::ScopedAStatus Allocator::getIMapperLibrarySuffix(std::string* outResult) {
+-    *outResult = "minigbm";
++    *outResult = "minigbm_gd";
+     return ndk::ScopedAStatus::ok();
+ }
+ 
+diff -ruN '--exclude=.git' mg2-base/cros_gralloc/aidl/allocator_gd.rc mg2/cros_gralloc/aidl/allocator_gd.rc
+--- a/cros_gralloc/aidl/allocator_gd.rc	1969-12-31 18:00:00.000000000 -0600
++++ b/cros_gralloc/aidl/allocator_gd.rc	2026-11-02 07:17:56.374891423 -0600
+@@ -0,0 +1,7 @@
++service vendor.graphics.allocator /vendor/bin/hw/android.hardware.graphics.allocator-service.minigbm_gd
++    class hal animation
++    user system
++    group graphics drmrpc
++    capabilities SYS_NICE
++    onrestart restart surfaceflinger
++    task_profiles ServiceCapacityLow
+diff -ruN '--exclude=.git' mg2-base/cros_gralloc/aidl/meson.build mg2/cros_gralloc/aidl/meson.build
+--- a/cros_gralloc/aidl/meson.build	1969-12-31 18:00:00.000000000 -0600
++++ b/cros_gralloc/aidl/meson.build	2026-11-02 07:17:56.377891416 -0600
+@@ -0,0 +1,13 @@
++# AIDL allocator (gralloc5), service name/paths use the GloDroid "_gd" suffix
++executable(
++    'android.hardware.graphics.allocator-service.minigbm_gd',
++    files('Allocator.cpp', 'Main.cpp', '../gralloc4/CrosGralloc4Utils.cc'),
++    link_with : libminigbm_gralloc,
++    dependencies : deps,
++    include_directories: inc_include,
++    install : true,
++    install_dir : get_option('bindir') / 'hw',
++)
++
++install_data('allocator_gd.rc', install_dir : get_option('sysconfdir') / 'init')
++install_data('allocator.xml', install_dir : get_option('sysconfdir') / 'vintf' / 'manifest')
+diff -ruN '--exclude=.git' mg2-base/cros_gralloc/mapper_stablec/mapper.minigbm_gd.xml mg2/cros_gralloc/mapper_stablec/mapper.minigbm_gd.xml
+--- a/cros_gralloc/mapper_stablec/mapper.minigbm_gd.xml	1969-12-31 18:00:00.000000000 -0600
++++ b/cros_gralloc/mapper_stablec/mapper.minigbm_gd.xml	2026-11-02 07:17:56.375891421 -0600
+@@ -0,0 +1,9 @@
++<manifest version="1.0" type="device">
++    <hal format="native">
++        <name>mapper</name>
++        <version>5.0</version>
++        <interface>
++            <instance>minigbm_gd</instance>
++        </interface>
++    </hal>
++</manifest>
+diff -ruN '--exclude=.git' mg2-base/cros_gralloc/mapper_stablec/meson.build mg2/cros_gralloc/mapper_stablec/meson.build
+--- a/cros_gralloc/mapper_stablec/meson.build	1969-12-31 18:00:00.000000000 -0600
++++ b/cros_gralloc/mapper_stablec/meson.build	2026-11-02 07:21:04.967436663 -0600
+@@ -0,0 +1,13 @@
++# Stable-C IMapper 5 implementation, loaded as /vendor/lib*/hw/mapper.<suffix>.so
++shared_library(
++    'mapper.minigbm_gd',
++    files('Mapper.cpp', '../gralloc4/CrosGralloc4Utils.cc'),
++    link_with : libminigbm_gralloc,
++    name_prefix : '',
++    override_options : ['cpp_std=c++20'],  # IMapperMetadataTypes.h helpers need C++20
++    dependencies : deps,
++    include_directories: inc_include,
++    install : true,
++)
++
++install_data('mapper.minigbm_gd.xml', install_dir : get_option('sysconfdir') / 'vintf' / 'manifest')
+diff -ruN '--exclude=.git' mg2-base/cros_gralloc/meson.build mg2/cros_gralloc/meson.build
+--- a/cros_gralloc/meson.build	2026-11-02 07:17:56.365584370 -0600
++++ b/cros_gralloc/meson.build	2026-11-02 07:17:56.372607818 -0600
+@@ -14,3 +14,5 @@
+ 
+ subdir('gralloc0')
+ subdir('gralloc4')
++subdir('aidl')
++subdir('mapper_stablec')

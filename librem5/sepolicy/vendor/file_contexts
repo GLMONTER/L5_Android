@@ -1,0 +1,20 @@
+# --- HALs installed by this device tree ---
+/vendor/bin/hw/android\.hardware\.sensors-service\.librem5   u:object_r:hal_sensors_default_exec:s0
+
+# Stable-C mapper (minigbm, "_gd" suffix): loaded in-process by every graphics client
+/vendor/lib(64)?/mapper\.minigbm_gd\.so                     u:object_r:same_process_hal_file:s0
+
+# --- Device nodes ---
+# card0 etnaviv, card1 mxsfb (panel) are labeled by GloDroid; card2 is the HDMI DCSS controller
+/dev/dri/card2                                              u:object_r:gpu_device:s0
+/dev/rfkill                                                 u:object_r:rfkill_device:s0
+
+# eMMC user-area partitions (GPT names from scripts/make-images.sh); ueventd labels the nodes
+# via these by-name aliases
+/dev/block/by-name/bootfs                                   u:object_r:boot_block_device:s0
+/dev/block/by-name/misc                                     u:object_r:misc_block_device:s0
+/dev/block/by-name/frp                                      u:object_r:frp_block_device:s0
+/dev/block/by-name/metadata                                 u:object_r:metadata_block_device:s0
+/dev/block/by-name/super                                    u:object_r:super_block_device:s0
+/dev/block/by-name/userdata                                 u:object_r:userdata_block_device:s0
+/vendor/bin/hw/android\.hardware\.power-service\.librem5    u:object_r:hal_power_default_exec:s0

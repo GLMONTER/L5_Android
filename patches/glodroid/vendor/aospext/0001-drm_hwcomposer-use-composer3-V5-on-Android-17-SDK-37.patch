@@ -1,0 +1,27 @@
+From 40b8257f73815544b58fff77b38025d7af993114 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 13:36:48 -0600
+Subject: [PATCH] drm_hwcomposer: use composer3 V5 on Android 17 (SDK 37)
+
+Upstream drm_hwcomposer uses DisplayCommand.activeConfig and
+Capability::DISPLAY_COMMAND_CONFIG_CHANGE, which are composer3 V5.
+---
+ meson_drmhwcomposer.mk | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/meson_drmhwcomposer.mk b/meson_drmhwcomposer.mk
+index 3816205..62a5f01 100644
+--- a/meson_drmhwcomposer.mk
++++ b/meson_drmhwcomposer.mk
+@@ -58,8 +58,10 @@ else ifeq ($(shell test $(PLATFORM_SDK_VERSION) -le 34; echo $$?), 0)
+ LOCAL_SHARED_LIBRARIES += android.hardware.graphics.composer3-V2-ndk
+ else ifeq ($(shell test $(PLATFORM_SDK_VERSION) -le 35; echo $$?), 0)
+ LOCAL_SHARED_LIBRARIES += android.hardware.graphics.composer3-V3-ndk
+-else
++else ifeq ($(shell test $(PLATFORM_SDK_VERSION) -le 36; echo $$?), 0)
+ LOCAL_SHARED_LIBRARIES += android.hardware.graphics.composer3-V4-ndk
++else
++LOCAL_SHARED_LIBRARIES += android.hardware.graphics.composer3-V5-ndk
+ endif
+ 
+ endif

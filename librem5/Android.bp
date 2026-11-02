@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+soong_namespace {
+}
+
+// fstab: vendor copy + first-stage ramdisk copy
+prebuilt_etc {
+    name: "fstab.librem5",
+    src: "fstab.librem5",
+    vendor: true,
+    vendor_ramdisk_available: true,
+}

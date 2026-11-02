@@ -1,0 +1,1 @@
+type rfkill_device, dev_type;               # /dev/rfkill (default Bluetooth HAL toggles BT radio)

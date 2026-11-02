@@ -1,0 +1,2 @@
+# Any graphics client (apps, SurfaceFlinger, codecs) loads the minigbm mapper in-process.
+get_prop(domain, vendor_minigbm_prop)

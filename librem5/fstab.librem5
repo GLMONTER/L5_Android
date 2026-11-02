@@ -1,0 +1,13 @@
+# Librem 5 -- Android partitions (GPT names; see androidboot.boot_devices on the cmdline)
+# No AVB: Purism u-boot cannot verify vbmeta. No metadata encryption: needs dm-default-key (Android kernels only); plain fscrypt v2 FBE instead.
+system                              /system         ext4    ro,barrier=1                          wait,first_stage_mount,logical,slotselect
+system_ext                          /system_ext     ext4    ro,barrier=1                          wait,first_stage_mount,logical,slotselect
+product                             /product        ext4    ro,barrier=1                          wait,first_stage_mount,logical,slotselect
+vendor                              /vendor         ext4    ro,barrier=1                          wait,first_stage_mount,logical,slotselect
+vendor_dlkm                         /vendor_dlkm    ext4    ro,noatime,errors=panic               wait,first_stage_mount,logical,slotselect
+/dev/block/by-name/misc             /misc           emmc    defaults                              defaults
+/dev/block/by-name/metadata         /metadata       ext4    noatime,nosuid,nodev,discard,sync     wait,check,formattable,first_stage_mount
+/dev/block/by-name/userdata         /data           ext4    noatime,nosuid,nodev,barrier=1        wait,check,latemount,quota,formattable,fileencryption=aes-256-xts:aes-256-cts:v2
+# microSD (USB card reader on the internal hub) and USB-C OTG storage
+/devices/platform/soc@0/38200000.usb/*                auto  auto  defaults  voldmanaged=sdcard1:auto
+/devices/platform/soc@0/38100000.usb/*                auto  auto  defaults  voldmanaged=usb:auto

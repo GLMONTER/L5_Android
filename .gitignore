@@ -1,0 +1,8 @@
+# Build outputs / extracted blobs (produced by scripts/, never committed)
+librem5-kernel/Image
+librem5-kernel/dtb/
+librem5-kernel/modules/
+librem5-kernel/modules.load
+librem5-firmware/brcm/
+out/
+*.pyc

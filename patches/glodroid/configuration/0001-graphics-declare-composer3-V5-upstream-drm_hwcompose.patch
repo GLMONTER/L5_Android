@@ -1,0 +1,23 @@
+From 950292ef77b949b74f3ba14f48cbc61b612591e8 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 13:36:48 -0600
+Subject: [PATCH] graphics: declare composer3 V5 (upstream drm_hwcomposer,
+ Android 17)
+
+---
+ common/graphics/android.hardware.graphics.composer@3.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/common/graphics/android.hardware.graphics.composer@3.xml b/common/graphics/android.hardware.graphics.composer@3.xml
+index fd9e638..5669c8f 100644
+--- a/common/graphics/android.hardware.graphics.composer@3.xml
++++ b/common/graphics/android.hardware.graphics.composer@3.xml
+@@ -1,7 +1,7 @@
+ <manifest version="1.0" type="device">
+     <hal format="aidl">
+         <name>android.hardware.graphics.composer3</name>
+-        <version>2</version>
++        <version>5</version>
+         <interface>
+             <name>IComposer</name>
+             <instance>default</instance>

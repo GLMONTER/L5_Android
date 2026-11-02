@@ -1,0 +1,13 @@
+diff --git a/drv_priv.h b/drv_priv.h
+index 247c733..d6e0b53 100644
+--- a/drv_priv.h
++++ b/drv_priv.h
+@@ -77,7 +77,7 @@ struct driver {
+ };
+ 
+ struct backend {
+-	char *name;
++	const char *name;
+ 	void (*preload)(bool load);
+ 	int (*init)(struct driver *drv);
+ 	void (*close)(struct driver *drv);

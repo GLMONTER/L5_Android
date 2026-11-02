@@ -1,0 +1,34 @@
+#!/bin/busybox sh
+# Librem 5 flash initramfs: USB gadget (CDC-ACM serial + NCM network) and a telnet shell on
+# 10.66.0.1, nothing else. Booted from RAM by uuu (scripts/flash-first.sh) or from bootfs when
+# /flashmode exists (scripts/flash.sh). The host serves images; scripts/phone-flash.sh writes them.
+/bin/busybox --install -s
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+mount -t devtmpfs dev /dev
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t configfs none /sys/kernel/config
+mkdir -p /dev/pts && mount -t devpts devpts /dev/pts
+mkdir -p /sys/fs/pstore && mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+echo "=== Librem 5 flash initramfs: kernel $(uname -r) ===" > /dev/kmsg
+
+G=/sys/kernel/config/usb_gadget/l5
+mkdir -p $G && cd $G
+echo 0x1d6b > idVendor; echo 0x0104 > idProduct
+mkdir -p strings/0x409
+echo "L5FLASH" > strings/0x409/serialnumber
+echo "Purism" > strings/0x409/manufacturer
+echo "Librem 5 flash mode" > strings/0x409/product
+mkdir -p configs/c.1/strings/0x409; echo "acm+ncm" > configs/c.1/strings/0x409/configuration
+mkdir -p functions/acm.gs0 functions/ncm.usb0
+ln -s functions/acm.gs0 configs/c.1/
+ln -s functions/ncm.usb0 configs/c.1/
+for i in 1 2 3 4 5 6 7 8 9 10; do U=$(ls /sys/class/udc | head -1); [ -n "$U" ] && break; sleep 1; done
+echo "$U" > UDC
+cd /
+sleep 2
+ifconfig usb0 10.66.0.1 netmask 255.255.255.0 up
+telnetd -l /bin/sh
+echo "=== flash mode: telnet 10.66.0.1, serial ttyGS0 ===" > /dev/kmsg
+echo "Librem 5 flash mode - telnet 10.66.0.1" > /dev/tty0 2>/dev/null
+while true; do setsid sh -c 'exec sh </dev/ttyGS0 >/dev/ttyGS0 2>&1'; sleep 1; done

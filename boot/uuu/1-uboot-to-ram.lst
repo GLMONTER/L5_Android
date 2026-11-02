@@ -1,0 +1,11 @@
+uuu_version 1.0.1
+SDP: boot -f ../u-boot/u-boot-librem5.imx
+SDPU: delay 1000
+SDPU: write -f ../u-boot/u-boot-librem5.imx -offset 0x57c00
+SDPU: jump
+SDPV: delay 1000
+SDPV: write -f ../u-boot/u-boot-librem5.imx -skipspl
+SDPV: jump
+FB: getvar version
+FB: getvar max-download-size
+FB: Done
