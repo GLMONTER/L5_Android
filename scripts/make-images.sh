@@ -13,7 +13,7 @@ source "$(dirname "$0")/common.sh"
 PRODUCT=$AOSP/out/target/product/librem5
 UNPACK=$AOSP/system/tools/mkbootimg/unpack_bootimg.py
 DTB=imx8mq-librem5-r4.dtb
-SELINUX_MODE=${SELINUX_MODE:-permissive}
+SELINUX_MODE=${SELINUX_MODE:-enforcing}
 for f in vendor_boot.img boot.img super.img kernel; do
     [ -f "$PRODUCT/$f" ] || die "$PRODUCT/$f missing: build Android first (scripts/build.sh)"
 done

@@ -1,5 +1,15 @@
 # Lookups of properties that are not set (in-process vendor libraries probing ro.hardware.* /
-# ro.vendor.* names without a platform context, ). Denial has the
+# ro.vendor.* names without a platform context). Denial has the
 # same result as "not set".
 dontaudit { appdomain surfaceflinger bootanim hal_graphics_allocator_default } vendor_default_prop:file { getattr map open read };
 dontaudit hal_graphics_allocator_default default_prop:file { getattr map open read };
+dontaudit system_server vendor_default_prop:file { getattr map open read };
+# system_server's Wi-Fi code probes HAL props this device does not set
+dontaudit system_server wifi_hal_prop:file { getattr map open read };
+# GloDroid sets the legacy wifi.supplicant_scan_interval; Android 17 does not use it
+dontaudit vendor_init wifi_prop:property_service set;
+# kdevtmpfs maintains its own hidden devtmpfs; Android's /dev is tmpfs managed by ueventd
+dontaudit kernel device:blk_file { create setattr unlink getattr };
+# init.rc debugfs tweaks (boot receiver tracing, mmc ext_csd) for features this device does not use
+dontaudit init debugfs_bootreceiver_tracing:dir { write add_name };
+dontaudit init debugfs_mmc:file setattr;

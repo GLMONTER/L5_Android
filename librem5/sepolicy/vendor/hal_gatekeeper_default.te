@@ -1,0 +1,3 @@
+# keystore2 negotiates the shared HMAC key with ISharedSecret/gatekeeper, which the nonsecure
+# gatekeeper APEX registers (labeled hal_gatekeeper_service, as on Cuttlefish).
+hal_client_domain(keystore, hal_gatekeeper)

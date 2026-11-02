@@ -10,14 +10,15 @@ patches and config, and the scripts to build and flash. Nothing else is modified
 | Works | Notes |
 |---|---|
 | Display, GPU (GLES 2.0, Mesa etnaviv), touch | mxsfb kernel patch for Android's RGBA buffers |
-| Wi-Fi (BCM43752), Bluetooth (BCM4362) | firmware extracted from the phone, see below |
+| Wi-Fi (BCM43752), Bluetooth (BCM4362) incl. A2DP audio | firmware from Purism's repo, see below; BT UART at 1.5 Mbaud (kernel patch 0005) |
 | Speaker, microphone | AOSP AIDL audio HAL + WM8962 routing from Purism's UCM profile |
-| Accelerometer, gyroscope, light, proximity, auto-rotate | IIO-backed sensors HAL |
+| Accelerometer, gyroscope, compass, light, proximity, auto-rotate, auto-brightness | IIO-backed sensors HAL |
+| Status LED, power hints, lock screen PIN | lights/power HALs, nonsecure gatekeeper |
+| SELinux enforcing | device policy in `librem5/sepolicy`; `SELINUX_MODE=permissive scripts/build.sh` to debug |
 | Battery/charging, buttons, vibration, USB adb | |
 | Suspend/resume | works in testing; one unreproduced non-wake seen |
 
-Not yet: modem (calls/SMS/data), earpiece, headphone routing untested, compass, cameras, HDMI,
-SELinux enforcing (device policy done; memfd needs a kernel backport).
+Not yet: modem (calls/SMS/data), earpiece, headphone routing untested, cameras, HDMI.
 
 Known gaps: `scripts/setup.sh` has not been run end to end on a fresh machine yet (everything
 after it has); the build depends on Purism, GloDroid, freedesktop and Debian keeping the
@@ -93,6 +94,12 @@ Hardware quirks found during bring-up (details in commit messages and file comme
   `ro.vendor.sensors.*.mount_matrix`). Accel/gyro share one ODR; >= 119 Hz tears gyro reads.
 - The VCNL4040 sits behind dark glass: use the longest ALS integration time.
 - The DT had no Bluetooth node (PureOS uses hciattach); kernel patch 0003 adds a serdev node.
+  BT_REG_ON is shared with Wi-Fi, so there is no shutdown GPIO and hci_bcm stays at 115200 baud,
+  too slow for A2DP; patch 0005 honours the DT max-speed. hci_uart loads after wlan0 exists
+  (brcmfmac resets the shared chip).
+- LSM9DS1 magnetometer axes: mount matrix -1,0,0;0,1,0;0,0,-1 (verified).
+- memfd: kernel patch 0004 (upstream backport) + the memfd_class policy capability; minigbm's
+  shared metadata region is then an allocator memfd that every graphics client maps.
 - Android 17 needs `CONFIG_CPUSETS_V1`, `sys.use_memfd=true` (no ashmem upstream), and an audio
   HAL with modules for every instance its VINTF declares, or system_server never finishes booting.
 
