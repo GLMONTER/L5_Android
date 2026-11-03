@@ -1,0 +1,40 @@
+From 1265eae2e2a4d3c62a692814c16f8c37843b1998 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 13:53:15 -0600
+Subject: [PATCH] android: capabilities: Use a supported AF mode in the scene
+ mode overrides
+
+The scene mode override for SCENE_MODE_DISABLED listed AF_MODE_OFF also
+for cameras with autofocus. The API1 shim (Camera2Client) refuses to open
+a camera whose overrides ask for fixed focus on a focuser that isn't
+calibrated for infinity focus ("unable to build defaults"), so the old
+camera API, used for example by the Camera2 app's video mode, failed.
+Use CONTINUOUS_PICTURE for cameras with autofocus.
+---
+ src/android/camera_capabilities.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/android/camera_capabilities.cpp b/src/android/camera_capabilities.cpp
+index a32fe9a..3b440d1 100644
+--- a/src/android/camera_capabilities.cpp
++++ b/src/android/camera_capabilities.cpp
+@@ -1046,10 +1046,15 @@ int CameraCapabilities::initializeStaticMetadata()
+ 	staticMetadata_->addEntry(ANDROID_CONTROL_MAX_REGIONS,
+ 				  availableMaxRegions);
+ 
++	/*
++	 * The AF mode must be one the camera has: the API1 shim rejects AF off
++	 * for a focuser that isn't calibrated for infinity focus.
++	 */
+ 	std::vector<uint8_t> sceneModesOverride = {
+ 		ANDROID_CONTROL_AE_MODE_ON,
+ 		ANDROID_CONTROL_AWB_MODE_AUTO,
+-		ANDROID_CONTROL_AF_MODE_OFF,
++		static_cast<uint8_t>(autoFocus_ ? ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE
++						: ANDROID_CONTROL_AF_MODE_OFF),
+ 	};
+ 	staticMetadata_->addEntry(ANDROID_CONTROL_SCENE_MODE_OVERRIDES,
+ 				  sceneModesOverride);
+-- 
+2.55.0
+

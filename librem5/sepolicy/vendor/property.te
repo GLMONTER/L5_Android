@@ -3,3 +3,4 @@ vendor_internal_prop(vendor_sensors_prop)   # ro.vendor.sensors.*: IIO mount mat
 vendor_public_prop(vendor_minigbm_prop)     # vendor.(gralloc.)minigbm.*: read in-process by every gralloc client
 vendor_internal_prop(vendor_radio_prop)     # ro.vendor.radio.*: modem AT port, data interface
 vendor_internal_prop(vendor_hks_prop)       # vendor.librem5.wlan_hks: Wi-Fi/BT kill switch state
+vendor_internal_prop(vendor_pm_debug_prop)  # persist.vendor.librem5.pm_debug: suspend debug logging

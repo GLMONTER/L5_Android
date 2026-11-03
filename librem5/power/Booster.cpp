@@ -63,6 +63,7 @@ Booster::Booster() {
     auto cpuFreqs = readList(cpu + "/scaling_available_frequencies");
     if (!cpuFreqs.empty()) {
         mCpuMinPath = cpu + "/scaling_min_freq";
+        mCpuMaxPath = cpu + "/scaling_max_freq";
         mCpuMinKhz = cpuFreqs.front();
         mCpuMaxKhz = cpuFreqs.back();
         mCpuInteractionKhz = mCpuMaxKhz;
@@ -114,17 +115,37 @@ void Booster::setInteractive(bool interactive) {
     mCv.notify_all();
 }
 
+void Booster::setLowPower(bool enabled) {
+    std::lock_guard l(mLock);
+    mLowPower = enabled;
+    applyLocked();
+}
+
 void Booster::applyLocked() {
     const auto now = Clock::now();
     const bool launch = mLaunch && now < mLaunchUntil;
     const bool touch = now < mInteractionUntil;
+    const long cpuMax = mLowPower ? mCpuInteractionKhz : mCpuMaxKhz;
     long cpu = launch ? mCpuMaxKhz : touch ? mCpuInteractionKhz : mCpuMinKhz;
+    cpu = std::min(cpu, cpuMax);
     long ddr = (launch || touch) ? mDdrMaxHz : mDdrMinHz;
+
+    // Lower the floor before the cap, raise the cap before the floor: min <= max throughout
+    if (!mCpuMaxPath.empty() && cpuMax > mAppliedCpuMax) {
+        if (WriteStringToFile(std::to_string(cpuMax), mCpuMaxPath)) mAppliedCpuMax = cpuMax;
+    }
     if (!mCpuMinPath.empty() && cpu != mAppliedCpu) {
         if (WriteStringToFile(std::to_string(cpu), mCpuMinPath)) {
             mAppliedCpu = cpu;
         } else {
             PLOG(WARNING) << "write " << mCpuMinPath;
+        }
+    }
+    if (!mCpuMaxPath.empty() && cpuMax != mAppliedCpuMax) {
+        if (WriteStringToFile(std::to_string(cpuMax), mCpuMaxPath)) {
+            mAppliedCpuMax = cpuMax;
+        } else {
+            PLOG(WARNING) << "write " << mCpuMaxPath;
         }
     }
     if (!mDdrMinPath.empty() && ddr != mAppliedDdr) {

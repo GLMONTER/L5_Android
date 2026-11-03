@@ -1,0 +1,2 @@
+# GNSS HAL (gnss/): NMEA from the receiver; opening /dev/gnss0 powers it (gnss-mtk driver)
+allow hal_gnss_default gnss_device:chr_file r_file_perms;

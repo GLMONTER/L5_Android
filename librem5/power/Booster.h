@@ -17,8 +17,11 @@
 // Librem 5 (i.MX8MQ) performance floors driven by power hints:
 //   INTERACTION boost -> CPU floor kInteractionCpuKhz + DRAM at max, for the hinted duration
 //   LAUNCH mode       -> CPU floor at max + DRAM at max while the launch is in progress
-//   INTERACTIVE=false -> everything released
+//   LOW_POWER (battery saver) -> CPU capped at kInteractionCpuKhz; floors never exceed the cap
+//   INTERACTIVE=false -> touch/launch floors released
 // schedutil keeps scaling above the floor; the floor only removes ramp-up latency on touch.
+// No camera streaming floor: the CPU debayer saturates schedutil and the DRAM devfreq governor by
+// itself (measured: 34.5 ms/frame either way).
 
 #pragma once
 
@@ -37,6 +40,7 @@ class Booster {
     void interaction(int32_t durationMs);
     void setLaunch(bool enabled);
     void setInteractive(bool interactive);
+    void setLowPower(bool enabled);
 
   private:
     using Clock = std::chrono::steady_clock;
@@ -52,13 +56,15 @@ class Booster {
     Clock::time_point mLaunchUntil{};
     bool mLaunch = false;
     bool mInteractive = true;
+    bool mLowPower = false;
 
     // Discovered at startup
     std::string mCpuMinPath;     // cpufreq policy scaling_min_freq
+    std::string mCpuMaxPath;     // cpufreq policy scaling_max_freq
     std::string mDdrMinPath;     // devfreq min_freq of the DRAM controller
     long mCpuMinKhz = 0, mCpuMaxKhz = 0, mCpuInteractionKhz = 0;
     long mDdrMinHz = 0, mDdrMaxHz = 0;
-    long mAppliedCpu = -1, mAppliedDdr = -1;
+    long mAppliedCpu = -1, mAppliedDdr = -1, mAppliedCpuMax = -1;
 };
 
 }  // namespace aidl::android::hardware::power::impl::example

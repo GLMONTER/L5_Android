@@ -4,3 +4,4 @@ vendor.gralloc.minigbm.     u:object_r:vendor_minigbm_prop:s0
 vendor.minigbm.             u:object_r:vendor_minigbm_prop:s0
 ro.vendor.radio.                u:object_r:vendor_radio_prop:s0
 vendor.librem5.wlan_hks     u:object_r:vendor_hks_prop:s0 exact string
+persist.vendor.librem5.pm_debug u:object_r:vendor_pm_debug_prop:s0 exact bool

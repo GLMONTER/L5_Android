@@ -5,10 +5,12 @@ on early-init
         --all=/vendor_dlkm/lib/modules/modules.load
 
 on boot
-    # Bluetooth after Wi-Fi: see modules.blocklist. wlan0 appears once brcmfmac's firmware is up.
+    # Bluetooth after Wi-Fi (see modules.blocklist), through the kill switch recovery below: its
+    # SDIO host reset power-cycles the combo chip, which a watchdog reset does not, leaving the
+    # Bluetooth part unresponsive (HCI RESET timeouts) until the next power-up. Wait for Wi-Fi
+    # first, so that the reset does not interrupt brcmfmac's first firmware download.
     wait /sys/class/net/wlan0 15
-    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -a -d /vendor_dlkm/lib/modules \
-        bluetooth btbcm hci_uart
+    setprop vendor.librem5.wlan_hks unblocked
 
     # Haptics: pwm-vibrator is exposed as a force-feedback input device
     chown system system /sys/class/leds/vibrator/brightness
@@ -30,3 +32,23 @@ on property:vendor.librem5.wlan_hks=unblocked
         bluetooth btbcm hci_uart
     start vendor.bluetooth-default
     setprop vendor.librem5.wlan_hks on
+
+# Watchdog (imx2-wdt): a hung phone resets itself, and the kernel log of the hang survives in
+# pstore (/sys/fs/pstore/console-ramoops-0 after the reboot). The watchdog pauses in suspend.
+service watchdogd /system/bin/watchdogd 10 20
+    class core
+    oneshot
+    seclabel u:r:watchdogd:s0
+
+# Suspend debugging, while the occasional hang after resume is investigated: log every device's
+# suspend/resume callback at a console log level that reaches pstore. Off with
+# `setprop persist.vendor.librem5.pm_debug 0` (it slows each suspend by a few seconds).
+on property:persist.vendor.librem5.pm_debug=1 && property:sys.boot_completed=1
+    write /sys/power/pm_print_times 1
+    write /sys/power/pm_debug_messages 1
+    write /proc/sys/kernel/printk "8 4 1 7"
+
+on property:persist.vendor.librem5.pm_debug=0
+    write /sys/power/pm_print_times 0
+    write /sys/power/pm_debug_messages 0
+    write /proc/sys/kernel/printk "3 4 1 7"

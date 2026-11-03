@@ -6,3 +6,6 @@ set_prop(vendor_init, vendor_radio_prop)
 # Kill switch recovery (init.librem5.rc): reset the SDIO host of the Wi-Fi/BT chip
 set_prop(vendor_init, vendor_hks_prop)
 allow vendor_init sysfs_sdio_host:file w_file_perms;
+# Suspend debug logging (init.librem5.rc, persist.vendor.librem5.pm_debug)
+get_prop(vendor_init, vendor_pm_debug_prop)
+allow vendor_init sysfs_power:file w_file_perms;

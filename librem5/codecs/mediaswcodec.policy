@@ -1,0 +1,10 @@
+# Extra syscalls for the software codec service (com.android.media.swcodec), appended to the
+# APEX's own seccomp policy by mediaswcodec. Mapping a gralloc buffer goes through minigbm's
+# gbm_mesa backend, which creates a Mesa screen: Mesa's CPU detection calls sched_getaffinity
+# and sysinfo, its worker threads sched_setaffinity, its shader cache mkdirat. Without them the
+# service dies with SIGSYS as soon as a video decoder writes a frame. GloDroid's
+# codecs/mediaswcodec.policy plus sched_setaffinity (Mesa 26).
+sysinfo: 1
+sched_getaffinity: 1
+sched_setaffinity: 1
+mkdirat: 1

@@ -19,10 +19,14 @@
                      samplingRates="48000"
                      channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
         </mixPort>
+        <!-- The SAI runs capture synchronously with playback: while the speaker plays, the
+             codec only accepts captures with the playback's rate and channel count (48 kHz
+             stereo), so the mic is always opened that way. AudioFlinger converts to what the
+             client asked for (e.g. mono for the camcorder). Both channels carry the mic. -->
         <mixPort name="primary input" role="sink">
             <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
-                     samplingRates="8000 16000 48000"
-                     channelMasks="AUDIO_CHANNEL_IN_MONO AUDIO_CHANNEL_IN_STEREO"/>
+                     samplingRates="48000"
+                     channelMasks="AUDIO_CHANNEL_IN_STEREO"/>
         </mixPort>
         <mixPort name="telephony_tx" role="source">
             <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"

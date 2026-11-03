@@ -1,0 +1,25 @@
+// Librem 5 GNSS HAL (AIDL IGnss V3): NMEA from the receiver on /dev/gnss0
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_binary {
+    name: "android.hardware.gnss-service.librem5",
+    vendor: true,
+    relative_install_path: "hw",
+    init_rc: ["android.hardware.gnss-service.librem5.rc"],
+    vintf_fragments: ["android.hardware.gnss-service.librem5.xml"],
+    srcs: [
+        "Gnss.cpp",
+        "Nmea.cpp",
+        "service.cpp",
+    ],
+    shared_libs: [
+        "android.hardware.gnss-V3-ndk",
+        "libbase",
+        "libbinder_ndk",
+        "liblog",
+        "libutils",
+    ],
+    cflags: ["-Wall", "-Werror"],
+}

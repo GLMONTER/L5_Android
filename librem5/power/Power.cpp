@@ -55,6 +55,9 @@ ScopedAStatus Power::setMode(Mode type, bool enabled) {
         case Mode::INTERACTIVE:
             Booster::getInstance().setInteractive(enabled);
             break;
+        case Mode::LOW_POWER:
+            Booster::getInstance().setLowPower(enabled);
+            break;
         default:
             break;
     }
@@ -63,7 +66,7 @@ ScopedAStatus Power::setMode(Mode type, bool enabled) {
 
 ScopedAStatus Power::isModeSupported(Mode type, bool* _aidl_return) {
     LOG(INFO) << "Power isModeSupported: " << static_cast<int32_t>(type);
-    *_aidl_return = type == Mode::LAUNCH || type == Mode::INTERACTIVE;
+    *_aidl_return = type == Mode::LAUNCH || type == Mode::INTERACTIVE || type == Mode::LOW_POWER;
     return ScopedAStatus::ok();
 }
 

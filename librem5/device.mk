@@ -122,6 +122,19 @@ PRODUCT_PACKAGES += android.hardware.lights-service.librem5
 # Hardware kill switches: Bluetooth recovery after the Wi-Fi/BT switch (hks/)
 PRODUCT_PACKAGES += librem5-hks-monitor
 
+# Video: Android's software codecs (com.android.media.swcodec); their seccomp policy needs the
+# syscalls Mesa makes when minigbm maps a frame
+PRODUCT_COPY_FILES += \
+    device/purism/librem5/codecs/mediaswcodec.policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/mediaswcodec.policy
+# Encoders fed from a Surface (screen recording, camera video): the framework creates the input
+# surface, the software Codec2 service has none (CCodec::createInputSurface crashes otherwise)
+PRODUCT_VENDOR_PROPERTIES += debug.stagefright.c2inputsurface=-1
+
+# GNSS: NMEA receiver on /dev/gnss0 (gnss/)
+PRODUCT_PACKAGES += android.hardware.gnss-service.librem5
+PRODUCT_COPY_FILES += \
+    frameworks/native/data/etc/android.hardware.location.gps.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.location.gps.xml
+
 # Framework overlay: adaptive brightness option + lux -> backlight curve
 PRODUCT_PACKAGES += Librem5FrameworkResOverlay
 
