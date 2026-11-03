@@ -1,0 +1,41 @@
+From dc7a9f0736ae1bcc4625c0c643f1b4bf63b077cf Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 22:36:33 -0600
+Subject: [PATCH] pipeline: simple: Don't report a defaulted bufferCount as an
+ adjustment
+
+validate() fills in the default buffer count when a stream configuration
+has none (zero), and reports the configuration as Adjusted. The Android
+camera HAL builds its stream configurations without a buffer count and
+treats an Adjusted configuration as unsupported, so every Android stream
+configuration on the simple pipeline failed.
+
+Treat a zero bufferCount as unspecified, as validate() already does for
+the color space, and only report an adjustment when a requested buffer
+count is changed.
+---
+ src/libcamera/pipeline/simple/simple.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index 82d6dfd..2c52f1c 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -1419,7 +1419,13 @@ CameraConfiguration::Status SimpleCameraConfiguration::validate()
+ 		else if (bufferCount > kNumBuffersMax)
+ 			cfg.bufferCount = kNumBuffersMax;
+ 
+-		if (cfg.bufferCount != bufferCount) {
++		/*
++		 * A zero bufferCount leaves the choice to the pipeline handler.
++		 * Filling it in is not an adjustment of the request (as for an
++		 * unspecified color space above): the Android HAL, for one,
++		 * leaves it at zero and rejects Adjusted configurations.
++		 */
++		if (bufferCount && cfg.bufferCount != bufferCount) {
+ 			LOG(SimplePipeline, Debug)
+ 				<< "Adjusting bufferCount from " << bufferCount
+ 				<< " to " << cfg.bufferCount;
+-- 
+2.55.0
+

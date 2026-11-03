@@ -1,0 +1,282 @@
+From a8fa56f9c972ce06382d60746cf598707e559706 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 20:28:23 -0600
+Subject: [PATCH] android: mm: generic: allocate with GraphicBufferAllocator
+
+The generic frame buffer allocator opened the gralloc0 HAL module
+through hw_get_module(GRALLOC_HARDWARE_MODULE_ID). Current Android
+devices only provide the AIDL allocator and gralloc mappers, so no
+gralloc0 module exists, and without a libhardware dependency the
+build links a stub whose hw_get_module() fails the ASSERT in the
+allocator constructor.
+
+Allocate through libui's android::GraphicBufferAllocator, which uses
+whatever allocator HAL the device provides. When libui is not found
+(compile tests), a stub is built instead.
+
+Ported to v0.8.0 from the BayLibre change carried in
+raspberry-vanilla/android_external_libcamera (android-16.0).
+---
+ include/android/meson.build                   |  5 +-
+ .../mm/generic_frame_buffer_allocator.cpp     | 69 ++++++-------------
+ .../mm/graphic_buffer_allocator_stub.cpp      | 53 ++++++++++++++
+ src/android/mm/libhardware_stub.c             | 17 -----
+ src/android/mm/meson.build                    |  9 ++-
+ 5 files changed, 83 insertions(+), 70 deletions(-)
+ create mode 100644 src/android/mm/graphic_buffer_allocator_stub.cpp
+ delete mode 100644 src/android/mm/libhardware_stub.c
+
+diff --git a/include/android/meson.build b/include/android/meson.build
+index da2504f..3709d26 100644
+--- a/include/android/meson.build
++++ b/include/android/meson.build
+@@ -3,5 +3,8 @@
+ android_includes = ([
+     include_directories('hardware/libhardware/include/'),
+     include_directories('metadata/'),
+-    include_directories('system/core/include'),
++    # System (-isystem) so that a real Android tree's headers (passed as -I) take precedence:
++    # libui pulls in liblog/libcutils headers that need the real android/log.h, which this
++    # bundled copy predates (no log_id_t).
++    include_directories('system/core/include', is_system : true),
+ ])
+diff --git a/src/android/mm/generic_frame_buffer_allocator.cpp b/src/android/mm/generic_frame_buffer_allocator.cpp
+index c23d24e..b9b4e8d 100644
+--- a/src/android/mm/generic_frame_buffer_allocator.cpp
++++ b/src/android/mm/generic_frame_buffer_allocator.cpp
+@@ -2,10 +2,9 @@
+ /*
+  * Copyright (C) 2021, Google Inc.
+  *
+- * Allocate FrameBuffer using gralloc API
++ * Allocate FrameBuffer using Android's GraphicBufferAllocator
+  */
+ 
+-#include <dlfcn.h>
+ #include <memory>
+ #include <vector>
+ 
+@@ -16,8 +15,11 @@
+ #include "libcamera/internal/framebuffer.h"
+ 
+ #include <hardware/camera3.h>
+-#include <hardware/gralloc.h>
+-#include <hardware/hardware.h>
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wextra-semi"
++#include <ui/GraphicBufferAllocator.h>
++#pragma GCC diagnostic pop
++#include <utils/Errors.h>
+ 
+ #include "../camera_device.h"
+ #include "../frame_buffer_allocator.h"
+@@ -33,35 +35,25 @@ class GenericFrameBufferData : public FrameBuffer::Private
+ 	LIBCAMERA_DECLARE_PUBLIC(FrameBuffer)
+ 
+ public:
+-	GenericFrameBufferData(struct alloc_device_t *allocDevice,
++	GenericFrameBufferData(android::GraphicBufferAllocator &allocDevice,
+ 			       buffer_handle_t handle,
+ 			       std::span<const FrameBuffer::Plane> planes)
+ 		: FrameBuffer::Private(planes), allocDevice_(allocDevice),
+ 		  handle_(handle)
+ 	{
+-		ASSERT(allocDevice_);
+ 		ASSERT(handle_);
+ 	}
+ 
+ 	~GenericFrameBufferData() override
+ 	{
+-		/*
+-		 * allocDevice_ is used to destroy handle_. allocDevice_ is
+-		 * owned by PlatformFrameBufferAllocator::Private.
+-		 * GenericFrameBufferData must be destroyed before it is
+-		 * destroyed.
+-		 *
+-		 * \todo Consider managing alloc_device_t with std::shared_ptr
+-		 * if this is difficult to maintain.
+-		 *
+-		 * \todo Thread safety against alloc_device_t is not documented.
+-		 * Is it no problem to call alloc/free in parallel?
+-		 */
+-		allocDevice_->free(allocDevice_, handle_);
++		/* GraphicBufferAllocator is a process-wide singleton. */
++		android::status_t status = allocDevice_.free(handle_);
++		if (status != android::NO_ERROR)
++			LOG(HAL, Error) << "Error freeing framebuffer: " << status;
+ 	}
+ 
+ private:
+-	struct alloc_device_t *allocDevice_;
++	android::GraphicBufferAllocator &allocDevice_;
+ 	const buffer_handle_t handle_;
+ };
+ } /* namespace */
+@@ -73,50 +65,33 @@ class PlatformFrameBufferAllocator::Private : public Extensible::Private
+ public:
+ 	Private(CameraDevice *const cameraDevice)
+ 		: cameraDevice_(cameraDevice),
+-		  hardwareModule_(nullptr),
+-		  allocDevice_(nullptr)
++		  allocDevice_(android::GraphicBufferAllocator::get())
+ 	{
+-		hw_get_module(GRALLOC_HARDWARE_MODULE_ID, &hardwareModule_);
+-		ASSERT(hardwareModule_);
+ 	}
+ 
+-	~Private() override;
++	~Private() override = default;
+ 
+ 	std::unique_ptr<HALFrameBuffer>
+ 	allocate(int halPixelFormat, const libcamera::Size &size, uint32_t usage);
+ 
+ private:
+ 	const CameraDevice *const cameraDevice_;
+-	const struct hw_module_t *hardwareModule_;
+-	struct alloc_device_t *allocDevice_;
++	android::GraphicBufferAllocator &allocDevice_;
+ };
+ 
+-PlatformFrameBufferAllocator::Private::~Private()
+-{
+-	if (allocDevice_)
+-		gralloc_close(allocDevice_);
+-	dlclose(hardwareModule_->dso);
+-}
+-
+ std::unique_ptr<HALFrameBuffer>
+ PlatformFrameBufferAllocator::Private::allocate(int halPixelFormat,
+ 						const libcamera::Size &size,
+ 						uint32_t usage)
+ {
+-	if (!allocDevice_) {
+-		int ret = gralloc_open(hardwareModule_, &allocDevice_);
+-		if (ret) {
+-			LOG(HAL, Fatal) << "gralloc_open() failed: " << ret;
+-			return nullptr;
+-		}
+-	}
+-
+-	int stride = 0;
++	uint32_t stride = 0;
+ 	buffer_handle_t handle = nullptr;
+-	int ret = allocDevice_->alloc(allocDevice_, size.width, size.height,
+-				      halPixelFormat, usage, &handle, &stride);
+-	if (ret) {
+-		LOG(HAL, Error) << "failed buffer allocation: " << ret;
++	android::status_t status =
++		allocDevice_.allocate(size.width, size.height, halPixelFormat,
++				      1 /* layerCount */, usage, &handle,
++				      &stride, "libcameraHAL");
++	if (status != android::NO_ERROR) {
++		LOG(HAL, Error) << "failed buffer allocation: " << status;
+ 		return nullptr;
+ 	}
+ 	if (!handle) {
+diff --git a/src/android/mm/graphic_buffer_allocator_stub.cpp b/src/android/mm/graphic_buffer_allocator_stub.cpp
+new file mode 100644
+index 0000000..814b3d0
+--- /dev/null
++++ b/src/android/mm/graphic_buffer_allocator_stub.cpp
+@@ -0,0 +1,53 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++/*
++ * Copyright (C) 2023, Ideas on Board
++ * Copyright (C) 2023, BayLibre
++ *
++ * graphic_buffer_allocator_stub.cpp - Android GraphicBufferAllocator
++ * stub for compile-testing
++ */
++
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wextra-semi"
++#include <ui/GraphicBufferAllocator.h>
++#pragma GCC diagnostic pop
++
++namespace android {
++
++ANDROID_SINGLETON_STATIC_INSTANCE(GraphicBufferAllocator)
++
++GraphicBufferAllocator::GraphicBufferAllocator()
++{
++}
++GraphicBufferAllocator::~GraphicBufferAllocator()
++{
++}
++
++uint64_t GraphicBufferAllocator::getTotalSize() const
++{
++	return 0;
++}
++
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wunused-parameter"
++status_t GraphicBufferAllocator::allocate(uint32_t width,
++					  uint32_t height,
++					  PixelFormat format,
++					  uint32_t layerCount,
++					  uint64_t usage,
++					  buffer_handle_t *handle,
++					  uint32_t *stride,
++					  std::string requestorName)
++{
++	*handle = nullptr;
++	*stride = 0;
++	return INVALID_OPERATION;
++}
++
++status_t GraphicBufferAllocator::free(buffer_handle_t handle)
++{
++	return INVALID_OPERATION;
++}
++#pragma GCC diagnostic pop
++
++} // namespace android
+diff --git a/src/android/mm/libhardware_stub.c b/src/android/mm/libhardware_stub.c
+deleted file mode 100644
+index 28faa63..0000000
+--- a/src/android/mm/libhardware_stub.c
++++ /dev/null
+@@ -1,17 +0,0 @@
+-/* SPDX-License-Identifier: Apache-2.0 */
+-/*
+- * Copyright (C) 2023, Ideas on Board
+- *
+- * Android libhardware stub for test compilation
+- */
+-
+-#include <errno.h>
+-
+-#include <hardware/hardware.h>
+-
+-int hw_get_module(const char *id __attribute__((__unused__)),
+-		  const struct hw_module_t **module)
+-{
+-	*module = NULL;
+-	return -ENOTSUP;
+-}
+diff --git a/src/android/mm/meson.build b/src/android/mm/meson.build
+index e3e0484..203b8c3 100644
+--- a/src/android/mm/meson.build
++++ b/src/android/mm/meson.build
+@@ -4,13 +4,12 @@ platform = get_option('android_platform')
+ if platform == 'generic'
+     android_hal_sources += files(['generic_camera_buffer.cpp',
+                                   'generic_frame_buffer_allocator.cpp'])
+-    android_deps += [libdl]
+ 
+-    libhardware = dependency('libhardware', required : false)
+-    if libhardware.found()
+-        android_deps += [libhardware]
++    libui = dependency('libui', required : false)
++    if libui.found()
++        android_deps += [libui]
+     else
+-        android_hal_sources += files(['libhardware_stub.c'])
++        android_hal_sources += files(['graphic_buffer_allocator_stub.cpp'])
+     endif
+ elif platform == 'cros'
+     android_hal_sources += files(['cros_camera_buffer.cpp',
+-- 
+2.55.0
+

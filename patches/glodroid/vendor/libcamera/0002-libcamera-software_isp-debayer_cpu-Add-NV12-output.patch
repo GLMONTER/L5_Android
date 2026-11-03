@@ -1,0 +1,339 @@
+From 3b614784d3146c5cc0dfba05247c7037c528b081 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 21:43:34 -0600
+Subject: [PATCH 2/3] libcamera: software_isp: debayer_cpu: Add NV12 output
+
+The CPU debayer only produces RGB formats. The Android camera HAL needs
+a YUV 4:2:0 stream (NV12 or NV21) for the mandatory YCbCr_420_888 and
+IMPLEMENTATION_DEFINED formats, and as the source of its JPEG encoder,
+so cameras behind the software ISP are rejected by the HAL.
+
+Add NV12 output. Each line pair is debayered to RGB888 scratch lines
+with the existing functions (so black level, gains, CCM and gamma all
+apply), then converted to two Y lines and one interleaved CbCr line,
+chroma averaged over 2x2 pixels. The conversion is full-range BT.601
+(JFIF), matching the sYCC colour space the simple pipeline reports for
+YUV output.
+
+The UV plane is taken from the second plane of the output buffer, or
+from after the Y plane when the buffer has a single plane (as buffers
+exported by the software ISP do). Only Bayer patterns of height 2 are
+supported, which covers all current input formats.
+---
+ src/libcamera/software_isp/debayer_cpu.cpp | 154 ++++++++++++++++++---
+ src/libcamera/software_isp/debayer_cpu.h   |   4 +
+ 2 files changed, 137 insertions(+), 21 deletions(-)
+
+diff --git a/src/libcamera/software_isp/debayer_cpu.cpp b/src/libcamera/software_isp/debayer_cpu.cpp
+index 91867ba..8f41cf7 100644
+--- a/src/libcamera/software_isp/debayer_cpu.cpp
++++ b/src/libcamera/software_isp/debayer_cpu.cpp
+@@ -43,14 +43,16 @@ public:
+ 			 bool enableInputMemcpy);
+ 
+ 	void configure(unsigned int yStart, unsigned int yEnd);
+-	void process(uint32_t frame, const uint8_t *src, uint8_t *dst);
++	void process(uint32_t frame, const uint8_t *src, uint8_t *dst, uint8_t *dstUV);
+ 
+ private:
+ 	void setupInputMemcpy(const uint8_t *linePointers[]);
+ 	void shiftLinePointers(const uint8_t *linePointers[], const uint8_t *src);
+ 	void memcpyNextLine(const uint8_t *linePointers[]);
+-	void process2(uint32_t frame, const uint8_t *src, uint8_t *dst);
+-	void process4(uint32_t frame, const uint8_t *src, uint8_t *dst);
++	void process2(uint32_t frame, const uint8_t *src, uint8_t *dst, uint8_t *dstUV);
++	void process4(uint32_t frame, const uint8_t *src, uint8_t *dst, uint8_t *dstUV);
++	void debayerLinePair(const uint8_t *linePointers[], bool first,
++			     uint8_t *&dst, uint8_t *&dstUV);
+ 
+ 	/* Max. supported Bayer pattern height is 4, debayering this requires 5 lines */
+ 	static constexpr unsigned int kMaxLineBuffers = 5;
+@@ -63,6 +65,8 @@ private:
+ 	unsigned int lineBufferPadding_;
+ 	unsigned int lineBufferIndex_;
+ 	std::vector<uint8_t> lineBuffers_[kMaxLineBuffers];
++	/* NV12 output: two debayered RGB888 lines, converted to Y + UV per pair */
++	std::vector<uint8_t> rgbLines_[2];
+ 	bool enableInputMemcpy_;
+ };
+ 
+@@ -438,7 +442,8 @@ int DebayerCpu::getInputConfig(PixelFormat inputFormat, DebayerInputConfig &conf
+ 						   formats::ARGB8888,
+ 						   formats::BGR888,
+ 						   formats::XBGR8888,
+-						   formats::ABGR8888 };
++						   formats::ABGR8888,
++						   formats::NV12 };
+ 
+ 	if ((bayerFormat.bitDepth == 8 || bayerFormat.bitDepth == 10 || bayerFormat.bitDepth == 12) &&
+ 	    bayerFormat.packing == BayerFormat::Packing::None &&
+@@ -519,6 +524,7 @@ int DebayerCpu::setDebayerFunctions(PixelFormat inputFormat,
+ 
+ 	xShift_ = 0;
+ 	swapRedBlueGains_ = false;
++	outputNV12_ = false;
+ 
+ 	auto invalidFmt = []() -> int {
+ 		LOG(Debayer, Error) << "Unsupported input output format combination";
+@@ -526,6 +532,13 @@ int DebayerCpu::setDebayerFunctions(PixelFormat inputFormat,
+ 	};
+ 
+ 	switch (outputFormat) {
++	case formats::NV12:
++		/*
++		 * Debayer each line pair to RGB888 (B, G, R in memory) scratch
++		 * lines, then convert the pair to two Y lines and one UV line.
++		 */
++		outputNV12_ = true;
++		break;
+ 	case formats::XRGB8888:
+ 	case formats::ARGB8888:
+ 		addAlphaByte = true;
+@@ -673,6 +686,12 @@ int DebayerCpu::configure(const StreamConfiguration &inputCfg,
+ 	if (ret != 0)
+ 		return -EINVAL;
+ 
++	if (outputNV12_ && inputConfig_.patternSize.height != 2) {
++		LOG(Debayer, Error)
++			<< "NV12 output needs a Bayer pattern height of 2";
++		return -EINVAL;
++	}
++
+ 	ccmEnabled_ = ccmEnabled;
+ 
+ 	/*
+@@ -734,6 +753,9 @@ void DebayerCpuThread::configure(unsigned int yStart, unsigned int yEnd)
+ 		for (unsigned int i = 0; i <= inputConfig.patternSize.height; i++)
+ 			lineBuffers_[i].resize(lineBufferLength_);
+ 	}
++
++	for (auto &line : rgbLines_)
++		line.resize(debayer_->outputNV12_ ? debayer_->window_.width * 3 : 0);
+ }
+ 
+ /*
+@@ -818,20 +840,23 @@ void DebayerCpuThread::memcpyNextLine(const uint8_t *linePointers[])
+  * \param[in] src The source buffer
+  * \param[in] dst The destination buffer
+  */
+-void DebayerCpuThread::process(uint32_t frame, const uint8_t *src, uint8_t *dst)
++void DebayerCpuThread::process(uint32_t frame, const uint8_t *src, uint8_t *dst,
++				uint8_t *dstUV)
+ {
+ 	Rectangle &window = debayer_->window_;
+ 
+ 	/* Adjust src to top left corner of the window */
+ 	src += (window.y + yStart_) * debayer_->inputConfig_.stride +
+ 	       window.x * debayer_->inputConfig_.bpp / 8;
+-	/* Adjust dst for yStart_ */
++	/* Adjust dst for yStart_ (even: configure() aligns it to the pattern height) */
+ 	dst += yStart_ * debayer_->outputConfig_.stride;
++	if (dstUV)
++		dstUV += yStart_ / 2 * debayer_->outputConfig_.stride;
+ 
+ 	if (debayer_->inputConfig_.patternSize.height == 2)
+-		process2(frame, src, dst);
++		process2(frame, src, dst, dstUV);
+ 	else
+-		process4(frame, src, dst);
++		process4(frame, src, dst, dstUV);
+ 
+ 	debayer_->workPendingMutex_.lock();
+ 	debayer_->workPending_ &= ~(1 << threadIndex_);
+@@ -839,9 +864,42 @@ void DebayerCpuThread::process(uint32_t frame, const uint8_t *src, uint8_t *dst)
+ 	debayer_->workPendingCv_.notify_one();
+ }
+ 
+-void DebayerCpuThread::process2(uint32_t frame, const uint8_t *src, uint8_t *dst)
++/*
++ * Debayer the first (\a first true) or second line of a line pair. For RGB
++ * output the line is written to \a dst directly. For NV12 it goes to an RGB
++ * scratch line, and after the second line the pair is converted into two Y
++ * lines at \a dst and one interleaved UV line at \a dstUV. Advances the
++ * destination pointers past what was written.
++ */
++void DebayerCpuThread::debayerLinePair(const uint8_t *linePointers[], bool first,
++				       uint8_t *&dst, uint8_t *&dstUV)
++{
++	const unsigned int outputStride = debayer_->outputConfig_.stride;
++
++	if (!debayer_->outputNV12_) {
++		if (first)
++			debayer_->debayer0(dst, linePointers);
++		else
++			debayer_->debayer1(dst, linePointers);
++		dst += outputStride;
++		return;
++	}
++
++	if (first) {
++		debayer_->debayer0(rgbLines_[0].data(), linePointers);
++		return;
++	}
++
++	debayer_->debayer1(rgbLines_[1].data(), linePointers);
++	DebayerCpu::rgbToNV12(rgbLines_[0].data(), rgbLines_[1].data(),
++			      debayer_->window_.width, dst, dst + outputStride, dstUV);
++	dst += 2 * outputStride;
++	dstUV += outputStride;
++}
++
++void DebayerCpuThread::process2(uint32_t frame, const uint8_t *src, uint8_t *dst,
++				uint8_t *dstUV)
+ {
+-	unsigned int outputStride = debayer_->outputConfig_.stride;
+ 	unsigned int inputStride = debayer_->inputConfig_.stride;
+ 	Rectangle &window = debayer_->window_;
+ 	unsigned int yEnd = yEnd_;
+@@ -877,35 +935,32 @@ void DebayerCpuThread::process2(uint32_t frame, const uint8_t *src, uint8_t *dst
+ 		shiftLinePointers(linePointers, src);
+ 		memcpyNextLine(linePointers);
+ 		debayer_->stats_->processLine0(frame, y, linePointers, threadIndex_);
+-		debayer_->debayer0(dst, linePointers);
++		debayerLinePair(linePointers, true, dst, dstUV);
+ 		src += inputStride;
+-		dst += outputStride;
+ 
+ 		shiftLinePointers(linePointers, src);
+ 		memcpyNextLine(linePointers);
+-		debayer_->debayer1(dst, linePointers);
++		debayerLinePair(linePointers, false, dst, dstUV);
+ 		src += inputStride;
+-		dst += outputStride;
+ 	}
+ 
+ 	if (window.y == 0 && yEnd_ == window.height) {
+ 		shiftLinePointers(linePointers, src);
+ 		memcpyNextLine(linePointers);
+ 		debayer_->stats_->processLine0(frame, yEnd, linePointers, threadIndex_);
+-		debayer_->debayer0(dst, linePointers);
++		debayerLinePair(linePointers, true, dst, dstUV);
+ 		src += inputStride;
+-		dst += outputStride;
+ 
+ 		shiftLinePointers(linePointers, src);
+ 		/* next line may point outside of src, use prev. */
+ 		linePointers[2] = linePointers[0];
+-		debayer_->debayer1(dst, linePointers);
++		debayerLinePair(linePointers, false, dst, dstUV);
+ 		src += inputStride;
+-		dst += outputStride;
+ 	}
+ }
+ 
+-void DebayerCpuThread::process4(uint32_t frame, const uint8_t *src, uint8_t *dst)
++void DebayerCpuThread::process4(uint32_t frame, const uint8_t *src, uint8_t *dst,
++				[[maybe_unused]] uint8_t *dstUV)
+ {
+ 	unsigned int outputStride = debayer_->outputConfig_.stride;
+ 	unsigned int inputStride = debayer_->inputConfig_.stride;
+@@ -1046,6 +1101,47 @@ void DebayerCpu::updateLookupTables(const DebayerParams &params)
+ 	params_ = params;
+ }
+ 
++/**
++ * \brief Convert two RGB888 lines to NV12
++ * \param[in] rgb0 First line, B, G, R bytes per pixel (DRM RGB888)
++ * \param[in] rgb1 Second line
++ * \param[in] width Line width in pixels (even)
++ * \param[out] y0 Y line for \a rgb0
++ * \param[out] y1 Y line for \a rgb1
++ * \param[out] uv Interleaved Cb/Cr line, chroma averaged over 2x2 pixels
++ *
++ * Uses full-range BT.601 (JFIF), the YCbCr flavour of the sYCC colour space
++ * the pipeline reports for YUV output, and what Android expects from camera
++ * YUV buffers and the JPEG encoder.
++ */
++void DebayerCpu::rgbToNV12(const uint8_t *rgb0, const uint8_t *rgb1, unsigned int width,
++			   uint8_t *y0, uint8_t *y1, uint8_t *uv)
++{
++	auto luma = [](int b, int g, int r) -> uint8_t {
++		return (77 * r + 150 * g + 29 * b + 128) >> 8;
++	};
++
++	for (unsigned int x = 0; x < width; x += 2) {
++		const uint8_t *p0 = rgb0 + x * 3;
++		const uint8_t *p1 = rgb1 + x * 3;
++
++		y0[x] = luma(p0[0], p0[1], p0[2]);
++		y0[x + 1] = luma(p0[3], p0[4], p0[5]);
++		y1[x] = luma(p1[0], p1[1], p1[2]);
++		y1[x + 1] = luma(p1[3], p1[4], p1[5]);
++
++		/* Sums of 4 pixels: coefficients carry an extra factor of 4 */
++		const int b = p0[0] + p0[3] + p1[0] + p1[3];
++		const int g = p0[1] + p0[4] + p1[1] + p1[4];
++		const int r = p0[2] + p0[5] + p1[2] + p1[5];
++		const int cb = ((-43 * r - 85 * g + 128 * b + 512) >> 10) + 128;
++		const int cr = ((128 * r - 107 * g - 21 * b + 512) >> 10) + 128;
++
++		uv[x] = std::clamp(cb, 0, 255);
++		uv[x + 1] = std::clamp(cr, 0, 255);
++	}
++}
++
+ void DebayerCpu::process(uint32_t frame, FrameBuffer *input, FrameBuffer *output, const DebayerParams &params)
+ {
+ 	bench_.startFrame();
+@@ -1076,10 +1172,25 @@ void DebayerCpu::process(uint32_t frame, FrameBuffer *input, FrameBuffer *output
+ 	workPending_ = (1 << threads_.size()) - 1;
+ 	workPendingMutex_.unlock();
+ 
++	uint8_t *dstUV = nullptr;
++	if (outputNV12_) {
++		const size_t ySize = outputConfig_.stride * window_.height;
++		if (out.planes().size() > 1)
++			dstUV = out.planes()[1].data();
++		else if (out.planes()[0].size() >= ySize + ySize / 2)
++			dstUV = out.planes()[0].data() + ySize;
++
++		if (!dstUV) {
++			LOG(Debayer, Error) << "NV12 output buffer too small";
++			metadata.status = FrameMetadata::FrameError;
++			return;
++		}
++	}
++
+ 	for (auto &thread : threads_)
+ 		thread->invokeMethod(&DebayerCpuThread::process,
+ 				     ConnectionTypeQueued, frame,
+-				     in.planes()[0].data(), out.planes()[0].data());
++				     in.planes()[0].data(), out.planes()[0].data(), dstUV);
+ 
+ 	{
+ 		MutexLocker locker(workPendingMutex_);
+@@ -1088,7 +1199,8 @@ void DebayerCpu::process(uint32_t frame, FrameBuffer *input, FrameBuffer *output
+ 		});
+ 	}
+ 
+-	metadata.planes()[0].bytesused = out.planes()[0].size();
++	for (unsigned int i = 0; i < metadata.planes().size() && i < out.planes().size(); i++)
++		metadata.planes()[i].bytesused = out.planes()[i].size();
+ 
+ 	dmaSyncers.clear();
+ 
+diff --git a/src/libcamera/software_isp/debayer_cpu.h b/src/libcamera/software_isp/debayer_cpu.h
+index ae57089..a5bef0c 100644
+--- a/src/libcamera/software_isp/debayer_cpu.h
++++ b/src/libcamera/software_isp/debayer_cpu.h
+@@ -121,6 +121,9 @@ private:
+ 	template<bool addAlphaByte, bool ccmEnabled>
+ 	void debayer12P_RGRG_BGR888(uint8_t *dst, const uint8_t *src[]);
+ 
++	static void rgbToNV12(const uint8_t *rgb0, const uint8_t *rgb1, unsigned int width,
++			      uint8_t *y0, uint8_t *y1, uint8_t *uv);
++
+ 	static int getInputConfig(PixelFormat inputFormat, DebayerInputConfig &config);
+ 	int setupStandardBayerOrder(BayerFormat::Order order);
+ 	int setDebayerFunctions(PixelFormat inputFormat,
+@@ -156,6 +159,7 @@ private:
+ 	Rectangle window_;
+ 	std::unique_ptr<SwStatsCpu> stats_;
+ 	unsigned int xShift_; /* Offset of 0/1 applied to window_.x */
++	bool outputNV12_ = false; /* Debayer to RGB888, then convert line pairs to NV12 */
+ 
+ 	static constexpr unsigned int kMinThreads = 1;
+ 	static constexpr unsigned int kMaxThreads = 8;
+-- 
+2.55.0
+

@@ -1,0 +1,12 @@
+// libyaml as a vendor shared library for libcamera (built by aospext, which can only link
+// shared libraries). AOSP ships libyaml as a static library only.
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_library_shared {
+    name: "libyaml_vendor",
+    vendor: true,
+    whole_static_libs: ["libyaml"],
+    export_static_lib_headers: ["libyaml"],
+}

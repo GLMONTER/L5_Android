@@ -1,0 +1,44 @@
+From 7607d2e3b1b1423b90d75af17352974b8e5f4af3 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 21:49:32 -0600
+Subject: [PATCH] arm64: dts: imx8mq-librem5: add startup delay to camera
+ supplies
+
+CAMERA_VDDIO_1V8 and CAMERA_VDDA_2V8 are fixed regulators switched by
+one GPIO and declare no startup delay. The Hynix HI846 front camera
+driver reads its chip ID about 0.1 ms after enabling its supplies, so
+when it probes before the rear sensor has powered these rails it gets
+no I2C ACK (-ENXIO) and fails to probe. Which sensor probes first
+depends on module load order, so the front camera is missing on some
+boots.
+
+Give both rails a 2 ms startup delay.
+---
+ arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi b/arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi
+index 1201fcbd4..c371e23bf 100644
+--- a/arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi
++++ b/arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi
+@@ -227,6 +227,8 @@ reg_csi_1v8: regulator-csi-1v8 {
+ 		vin-supply = <&reg_vdd_3v3>;
+ 		gpio = <&gpio1 0 GPIO_ACTIVE_HIGH>;
+ 		enable-active-high;
++		/* load switch ramp; the sensors read their chip ID ~0.1 ms after power-on */
++		startup-delay-us = <2000>;
+ 	};
+ 
+ 	/* controlled by the CAMERA_POWER_KEY HKS */
+@@ -247,6 +249,8 @@ reg_vcam_2v8: regulator-vcam-2v8 {
+ 		vin-supply = <&reg_vdd_3v3>;
+ 		gpio = <&gpio1 0 GPIO_ACTIVE_HIGH>;
+ 		enable-active-high;
++		/* load switch ramp; the sensors read their chip ID ~0.1 ms after power-on */
++		startup-delay-us = <2000>;
+ 	};
+ 
+ 	reg_gnss: regulator-gnss {
+-- 
+2.55.0
+

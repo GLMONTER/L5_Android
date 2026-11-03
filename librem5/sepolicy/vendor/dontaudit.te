@@ -15,3 +15,5 @@ dontaudit init debugfs_bootreceiver_tracing:dir { write add_name };
 dontaudit init debugfs_mmc:file setattr;
 # modprobe probes the kernel keyring (module signature checks) when loading the BT modules
 dontaudit vendor_modprobe self:key write;
+# Camera provider: libfmq probes ro.camera.{req,res}.fmq.size (unset, platform-private default_prop); defaults are used
+dontaudit hal_camera_default default_prop:file read;

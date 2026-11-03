@@ -1,0 +1,32 @@
+From 535ff9babae546a3f611ad02d8d8986c430617ff Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 18:58:11 -0600
+Subject: [PATCH] libyaml: visible to the Librem 5 device tree
+
+The Librem 5 builds upstream libcamera (meson, via aospext), which links
+libyaml as a shared library; device/purism/librem5/libyaml wraps this
+static library into one.
+
+Change-Id: Ia22a51b3ddf7607addf8ab2dad4a68cdd6c486ae
+---
+ Android.bp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/Android.bp b/Android.bp
+index 71c291d..b7382f4 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -1,6 +1,9 @@
+ cc_library_static {
+     name: "libyaml",
+-    visibility: ["//external/libcamera"],
++    visibility: [
++        "//external/libcamera",
++        "//device/purism/librem5:__subpackages__",
++    ],
+ 
+     export_include_dirs: [
+         "include",
+-- 
+2.55.0
+

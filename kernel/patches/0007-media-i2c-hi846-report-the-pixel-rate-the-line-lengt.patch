@@ -1,0 +1,53 @@
+From 30e5b81b796692206f1334c9c3f3ce331a346478 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 22:00:35 -0600
+Subject: [PATCH] media: i2c: hi846: report the pixel rate the line length is
+ counted in
+
+V4L2_CID_PIXEL_RATE was derived from the MIPI link frequency
+(link_freq * 2 * lanes / 10), but HBLANK and VBLANK are reported from the
+LLP/FLL register values, which count a different clock. Userspace computes
+the line duration as (width + hblank) / pixel_rate, so libcamera reported
+frame durations of 75-300 ms for modes that run at 30-120 fps and AGC
+worked with exposure times 3.6 to 9 times too long. Android then rejected
+every preview size of the front camera as slower than 30 fps.
+
+LLP x FLL x fps is 288e6 for every mode in the driver, so report a pixel
+rate of 288 MHz.
+---
+ drivers/media/i2c/hi846.c | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/media/i2c/hi846.c b/drivers/media/i2c/hi846.c
+index 3a4b7f659..6d195cb34 100644
+--- a/drivers/media/i2c/hi846.c
++++ b/drivers/media/i2c/hi846.c
+@@ -1395,14 +1395,19 @@ static u64 hi846_get_link_freq(struct hi846 *hi846)
+ 	return hi846_link_freqs[index];
+ }
+ 
++/*
++ * V4L2_CID_PIXEL_RATE must be in the unit of the line length (HBLANK) and
++ * frame length (VBLANK) controls, i.e. the clock that the LLP and FLL
++ * registers count. That clock is 288 MHz in every mode: LLP 3800 x FLL x fps
++ * gives 3800 * 631 * 120 = 3800 * 842 * 90 = 3800 * 2526 * 30 ~= 288e6.
++ * The MIPI link-derived rate used before (32 or 80 MHz) made userspace
++ * compute frame durations and exposure times 3.6 to 9 times too long.
++ */
++#define HI846_PIXEL_RATE		288000000ULL
++
+ static u64 hi846_calc_pixel_rate(struct hi846 *hi846)
+ {
+-	u64 link_freq = hi846_get_link_freq(hi846);
+-	u64 pixel_rate = link_freq * 2 * hi846->nr_lanes;
+-
+-	do_div(pixel_rate, HI846_RGB_DEPTH);
+-
+-	return pixel_rate;
++	return HI846_PIXEL_RATE;
+ }
+ 
+ static int hi846_read_reg(struct hi846 *hi846, u16 reg, u8 *val)
+-- 
+2.55.0
+

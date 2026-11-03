@@ -41,3 +41,24 @@ BOARD_KERNEL_CMDLINE += \
 
 # --- SELinux ---
 BOARD_VENDOR_SEPOLICY_DIRS += $(BC_PATH)/sepolicy/vendor
+
+# --- Cameras: libcamera (glodroid/vendor/libcamera, upstream v0.8.0) built by aospext ---
+# The i.MX8MQ has no ISP: the simple pipeline handler + software ISP (softisp IPA) debayers
+# and runs AE/AWB on the CPU. GloDroid's camera/board.mk is not used: it declares the HIDL
+# camera provider, which FCM 8 no longer allows.
+BOARD_BUILD_AOSPEXT_LIBCAMERA := true
+BOARD_LIBCAMERA_SRC_DIR := glodroid/vendor/libcamera
+BOARD_LIBCAMERA_PIPELINES := simple
+BOARD_LIBCAMERA_IPAS := softisp
+BOARD_LIBCAMERA_EXTRA_MESON_ARGS := \
+    -Dandroid=enabled -Dsoftisp-gpu=disabled -Dgstreamer=disabled -Dqcam=disabled \
+    -Dv4l2=disabled -Dtracing=disabled -Ddocumentation=disabled -Dudev=disabled
+# Format: TYPE:PATH_IN_INSTALL_DIR:VENDOR_SUBDIR:MODULE_NAME: (see aospext_gen_targets.mk)
+# The IPA goes in as "libetc" (copied, not stripped) so it still matches its .sign file and
+# libcamera loads it in-process. A stripped IPA fails the signature check and is run through
+# the softisp_ipa_proxy helper instead, which the camera HAL may not exec (neverallow).
+BOARD_LIBCAMERA_EXTRA_TARGETS := \
+    lib:libcamera-hal.so:hw:camera.libcamera: \
+    libetc:libcamera/ipa/ipa_softisp.so:libcamera/ipa:ipa_softisp.so: \
+    libetc:libcamera/ipa/ipa_softisp.so.sign:libcamera/ipa:ipa_softisp.so.sign: \
+    etc:shared/libcamera/ipa/softisp/uncalibrated.yaml:shared/libcamera/ipa/softisp:uncalibrated.yaml:

@@ -38,3 +38,9 @@
 # BM818 modem: radio HAL and its USB serial ports
 /vendor/bin/hw/android\.hardware\.radio-service\.librem5                      u:object_r:hal_radio_default_exec:s0
 /dev/ttyUSB[0-9]+                                                             u:object_r:radio_device:s0
+# Cameras: AIDL camera provider (libcamera HAL). libcamera opens the media controller, the
+# sensor/CSI/VCM/flash subdevs and the CSI capture nodes. GloDroid labels a few fixed node
+# numbers camera_device (fine: hal_camera may use both); everything else is video_device.
+/vendor/bin/hw/android\.hardware\.camera\.provider-service\.librem5           u:object_r:hal_camera_default_exec:s0
+/dev/media[0-9]+                                                              u:object_r:video_device:s0
+/dev/v4l-subdev[0-9]+                                                         u:object_r:video_device:s0

@@ -1,0 +1,11 @@
+service vendor.camera-provider-librem5 /vendor/bin/hw/android.hardware.camera.provider-service.librem5
+    interface aidl android.hardware.camera.provider.ICameraProvider/libcamera/0
+    class hal
+    user cameraserver
+    group audio camera input drmrpc
+    ioprio rt 4
+    capabilities SYS_NICE
+    task_profiles CameraServiceCapacity MaxPerformance
+    # libcamera logs to logcat (tag "libcamera"); raise to *:INFO or *:DEBUG when debugging
+    setenv LIBCAMERA_LOG_FILE syslog
+    setenv LIBCAMERA_LOG_LEVELS *:WARN

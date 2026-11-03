@@ -1,0 +1,63 @@
+// AIDL camera provider (android.hardware.camera.provider V1, ICameraProvider/libcamera/0) that
+// wraps a camera3 HAL module: libcamera's Android HAL, camera.libcamera.so in /vendor/lib64/hw,
+// selected by ro.hardware.camera=libcamera.
+//
+// FCM 8 only accepts the AIDL provider, and AOSP no longer ships a wrapper for camera3 modules
+// (the HIDL 2.x legacy provider is gone), so the sources here are the AIDL port of AOSP's legacy
+// wrapper carried in raspberry-vanilla/android_external_libcamera, branch android-16.0
+// (src/android/hal, commit 2c3d3b6). Changes, marked "Librem 5":
+//  - LibcameraDevice.cpp: a missing ALOGE argument (fails -Wformat)
+//  - LibcameraProvider.cpp: notifyDeviceStateChange() no longer crashes when the HAL module
+//    failed to load
+//  - LibcameraDeviceSession.cpp: freeReleaseFences() double-freed a native handle (provider abort
+//    once results arrive from more than one thread), and the makeFromAidl() wrappers of request
+//    buffers and acquire fences leaked on every request
+// This build file and the .rc/.xml next to it install the service into /vendor instead of an APEX.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_defaults {
+    name: "camera.provider-librem5-defaults",
+    vendor: true,
+    shared_libs: [
+        "android.hardware.camera.common-V1-ndk",
+        "android.hardware.camera.device-V1-ndk",
+        "android.hardware.camera.provider-V1-ndk",
+        "android.hardware.graphics.allocator-V2-ndk",
+        "libbinder_ndk",
+        "libcamera_metadata",
+        "libcutils",
+        "libfmq",
+        "libhardware",
+        "libhidlbase",
+        "liblog",
+        "libsync",
+        "libui",
+        "libutils",
+    ],
+    static_libs: [
+        "android.hardware.camera.common-helper",
+        "libaidlcommonsupport",
+    ],
+    header_libs: ["media_plugin_headers"],
+    defaults: ["android.hardware.graphics.common-ndk_shared"],
+    cflags: ["-Wno-unused-parameter"],
+}
+
+cc_binary {
+    name: "android.hardware.camera.provider-service.librem5",
+    defaults: ["camera.provider-librem5-defaults"],
+    relative_install_path: "hw",
+    init_rc: ["android.hardware.camera.provider-service.librem5.rc"],
+    vintf_fragments: ["android.hardware.camera.provider-service.librem5.xml"],
+    srcs: [
+        "LibcameraDevice.cpp",
+        "LibcameraDeviceSession.cpp",
+        "LibcameraProvider.cpp",
+        "convert.cpp",
+        "service.cpp",
+    ],
+    local_include_dirs: ["."],
+}

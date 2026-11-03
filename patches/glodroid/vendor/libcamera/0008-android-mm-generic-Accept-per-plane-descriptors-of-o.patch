@@ -1,0 +1,74 @@
+From ed00c1823eae8d582461d62e978d56fd6b7ad73c Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 23:00:36 -0600
+Subject: [PATCH 8/9] android: mm: generic: Accept per-plane descriptors of one
+ dmabuf
+
+CameraBuffer requires all file descriptors of the buffer handle to be
+the same, assuming a single dmabuf. minigbm stores one duplicated
+descriptor per plane, followed by the descriptor of its metadata
+region, so every multi-planar buffer was rejected as having
+discontiguous planes.
+
+Look at the first descriptor of each plane only, and compare the files
+they refer to (device and inode) rather than the descriptor numbers.
+---
+ src/android/mm/generic_camera_buffer.cpp | 25 +++++++++++++++++++++---
+ 1 file changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/src/android/mm/generic_camera_buffer.cpp b/src/android/mm/generic_camera_buffer.cpp
+index 4aeb254..cb1161f 100644
+--- a/src/android/mm/generic_camera_buffer.cpp
++++ b/src/android/mm/generic_camera_buffer.cpp
+@@ -7,7 +7,9 @@
+ 
+ #include "../camera_buffer.h"
+ 
++#include <algorithm>
+ #include <sys/mman.h>
++#include <sys/stat.h>
+ #include <unistd.h>
+ 
+ #include <libcamera/base/log.h>
+@@ -74,18 +76,35 @@ CameraBuffer::Private::Private([[maybe_unused]] CameraBuffer *cameraBuffer,
+ 	 * As Android doesn't offer an API to query buffer layouts, assume for
+ 	 * now that the buffer is backed by a single dmabuf, with planes being
+ 	 * stored contiguously.
++	 *
++	 * Gralloc implementations (minigbm for one) may store a separate,
++	 * duplicated file descriptor for each plane: compare the underlying
++	 * files, not the descriptor numbers. They can also add descriptors
++	 * that are not image data after the planes' (minigbm: the metadata
++	 * region), so only look at the first one per plane.
+ 	 */
+-	for (int i = 0; i < camera3Buffer->numFds; i++) {
+-		if (camera3Buffer->data[i] == -1 || camera3Buffer->data[i] == fd_)
++	const int numPlaneFds = std::min<int>(camera3Buffer->numFds, info.numPlanes());
++	struct stat fdStat = {};
++	for (int i = 0; i < numPlaneFds; i++) {
++		const int fd = camera3Buffer->data[i];
++		if (fd == -1 || fd == fd_)
++			continue;
++
++		struct stat st;
++		if (fstat(fd, &st) < 0)
+ 			continue;
+ 
+ 		if (fd_ != -1) {
++			if (st.st_dev == fdStat.st_dev && st.st_ino == fdStat.st_ino)
++				continue;
++
+ 			error_ = -EINVAL;
+ 			LOG(HAL, Error) << "Discontiguous planes are not supported";
+ 			return;
+ 		}
+ 
+-		fd_ = camera3Buffer->data[i];
++		fd_ = fd;
++		fdStat = st;
+ 	}
+ 
+ 	if (fd_ == -1) {
+-- 
+2.55.0
+

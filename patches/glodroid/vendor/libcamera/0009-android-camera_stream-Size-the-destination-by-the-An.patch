@@ -1,0 +1,40 @@
+From 2a95819a774fb23d7080cd1c2855aa4cab365717 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 23:00:36 -0600
+Subject: [PATCH 9/9] android: camera_stream: Size the destination by the
+ Android stream
+
+CameraStream::process() describes the destination Android buffer with
+the size of the libcamera stream configuration. That is the size of the
+source stream, which a Mapped stream (e.g. a YUV stream scaled from a
+larger one) does not necessarily share, and the destination buffer is
+then too small for the computed layout.
+
+Use the size of the Android stream for the destination buffer.
+---
+ src/android/camera_stream.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/android/camera_stream.cpp b/src/android/camera_stream.cpp
+index 7da01dc..002fa11 100644
+--- a/src/android/camera_stream.cpp
++++ b/src/android/camera_stream.cpp
+@@ -182,9 +182,14 @@ int CameraStream::process(Camera3RequestDescriptor::StreamBuffer *streamBuffer)
+ 		streamBuffer->fence.reset();
+ 	}
+ 
++	/*
++	 * The destination is the Android buffer, of the Android stream size,
++	 * which can be smaller than the source stream it is produced from.
++	 */
+ 	const StreamConfiguration &output = configuration();
++	const Size dstSize{ camera3Stream_->width, camera3Stream_->height };
+ 	streamBuffer->dstBuffer = std::make_unique<CameraBuffer>(
+-		*streamBuffer->camera3Buffer, output.pixelFormat, output.size,
++		*streamBuffer->camera3Buffer, output.pixelFormat, dstSize,
+ 		PROT_READ | PROT_WRITE);
+ 	if (!streamBuffer->dstBuffer->isValid()) {
+ 		LOG(HAL, Error) << "Failed to create destination buffer";
+-- 
+2.55.0
+

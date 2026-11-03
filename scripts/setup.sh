@@ -38,10 +38,10 @@ repo sync -c -j"${SYNC_JOBS:-8}" --no-tags --no-clone-bundle --optimized-fetch
 "$AOSP/device/purism/scripts/apply-patches.sh"
 
 if [ ! -x "$WORK/hostpy/bin/python3" ]; then
-    echo "== host Python venv with pycparser (Mesa)"
+    echo "== host Python venv (Mesa, libcamera code generators)"
     python3 -m venv --system-site-packages "$WORK/hostpy"
-    "$WORK/hostpy/bin/pip" install -q pycparser
 fi
+"$WORK/hostpy/bin/pip" install -q pycparser mako ply jinja2 pyyaml
 
 cat <<EOF
 

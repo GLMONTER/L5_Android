@@ -1,0 +1,9 @@
+# AIDL camera provider wrapping libcamera's camera3 HAL (camera/provider)
+
+# libcamera enumerates media devices and V4L2 subdevs through sysfs (built without udev)
+r_dir_file(hal_camera_default, sysfs)
+
+# libcamera's GraphicBufferAllocator (internal buffers, e.g. the JPEG source stream) and the
+# stable-C minigbm mapper for CPU access to the framework's gralloc buffers
+hal_client_domain(hal_camera_default, hal_graphics_allocator)
+allow hal_camera_default hal_graphics_mapper_service:service_manager find;

@@ -155,3 +155,16 @@ PRODUCT_VENDOR_PROPERTIES += \
     keyguard.no_require_sim=true \
     ro.vendor.radio.at_port=/dev/ttyUSB2 \
     ro.vendor.radio.data_interface=wwan0
+
+# Cameras: libcamera (simple pipeline + software ISP) behind its camera3 HAL module, served by an
+# AIDL camera provider (camera/provider). libcamera-cam is the command-line capture tool.
+PRODUCT_PACKAGES += \
+    libcamera libcamera-base libcamera-cam camera.libcamera \
+    ipa_softisp.so ipa_softisp.so.sign uncalibrated.yaml \
+    android.hardware.camera.provider-service.librem5
+PRODUCT_VENDOR_PROPERTIES += ro.hardware.camera=libcamera
+PRODUCT_COPY_FILES += \
+    device/purism/librem5/camera/camera_hal.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/camera_hal.yaml \
+    device/purism/librem5/camera/media_profiles_V1_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml \
+    frameworks/native/data/etc/android.hardware.camera.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.xml \
+    frameworks/native/data/etc/android.hardware.camera.front.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.front.xml

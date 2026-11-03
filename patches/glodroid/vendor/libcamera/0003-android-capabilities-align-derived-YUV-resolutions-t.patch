@@ -1,0 +1,68 @@
+From 47113e8dfe0ea45e814d241f1d0ccd82d0f94fc1 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 21:43:34 -0600
+Subject: [PATCH 3/3] android: capabilities: align derived YUV resolutions to
+ 32 pixels
+
+CameraBuffer computes the plane layout of Android buffers as tightly
+packed (stride equal to the width), but gralloc implementations align
+the stride of camera buffers; minigbm aligns it to 32 pixels. For a
+width that is not a multiple of 32 the HAL then writes and reads the
+planes at the wrong offsets.
+
+The fixed list of Android resolutions is 32-aligned already. Align the
+maximum resolution and the 1/2, 1/4, ... resolutions derived from it
+down to a multiple of 32 pixels in width (and 2 lines in height), so
+that both layouts agree.
+
+\todo Query the buffer layout from the gralloc mapper instead.
+---
+ src/android/camera_capabilities.cpp | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/src/android/camera_capabilities.cpp b/src/android/camera_capabilities.cpp
+index 00976f9..22da589 100644
+--- a/src/android/camera_capabilities.cpp
++++ b/src/android/camera_capabilities.cpp
+@@ -519,15 +519,27 @@ int CameraCapabilities::initializeStreamConfigurations()
+ 		     std::back_inserter(cameraResolutions),
+ 		     [&](const Size &res) { return res < maxRes; });
+ 
++	/*
++	 * CameraBuffer lays out the planes of Android buffers tightly packed
++	 * (stride == width), while gralloc implementations align the stride of
++	 * camera buffers (minigbm: 32 pixels). Keep the resolutions derived
++	 * from the maximum one at widths that are a multiple of 32, for which
++	 * both layouts agree. The fixed camera3Resolutions already are.
++	 */
++	constexpr unsigned int kWidthAlignment = 32;
++	auto aligned = [](const Size &size) {
++		return size.alignedDownTo(kWidthAlignment, 2);
++	};
++
+ 	/*
+ 	 * The Camera3 specification suggests adding 1/2 and 1/4 of the maximum
+ 	 * resolution.
+ 	 */
+ 	for (unsigned int divider = 2;; divider <<= 1) {
+-		Size derivedSize{
++		Size derivedSize = aligned({
+ 			maxRes.width / divider,
+ 			maxRes.height / divider,
+-		};
++		});
+ 
+ 		if (derivedSize.width < 320 ||
+ 		    derivedSize.height < 240)
+@@ -535,7 +547,7 @@ int CameraCapabilities::initializeStreamConfigurations()
+ 
+ 		cameraResolutions.push_back(derivedSize);
+ 	}
+-	cameraResolutions.push_back(maxRes);
++	cameraResolutions.push_back(aligned(maxRes));
+ 
+ 	/* Remove duplicated entries from the list of supported resolutions. */
+ 	std::sort(cameraResolutions.begin(), cameraResolutions.end());
+-- 
+2.55.0
+

@@ -2,3 +2,5 @@
 mapper/minigbm_gd                                               u:object_r:hal_graphics_mapper_service:s0
 # Registered by the nonsecure gatekeeper APEX; labeled as its own service (as Cuttlefish does)
 android.hardware.security.sharedsecret.ISharedSecret/gatekeeper u:object_r:hal_gatekeeper_service:s0
+# AIDL camera provider (libcamera HAL wrapper, camera/provider)
+android.hardware.camera.provider.ICameraProvider/libcamera/0                u:object_r:hal_camera_service:s0

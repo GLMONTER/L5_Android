@@ -1,0 +1,219 @@
+From ecf4cc41e008c45e236780d000a7f0084d85c303 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 22:24:59 -0600
+Subject: [PATCH] android: Derive streams in software when only one processed
+ stream is supported
+
+The simple pipeline handler with the software ISP produces a single
+processed stream. Android camera applications configure at least a
+preview and a capture stream (YUV or JPEG) of different sizes, which
+the HAL turns into two libcamera streams, and configuration fails.
+
+When the camera rejects the processed (NV12) streams as a set, keep
+only the largest one, or the one the JPEG stream is encoded from as
+that needs an exact size match, and add the other Android streams to
+it as Mapped streams. Streams can now also be mapped onto an Internal
+source stream, as happens when the JPEG source is internal.
+
+The YUV post-processor scales the whole source frame, so a derived
+stream of another aspect ratio came out distorted. Crop the source to
+the destination aspect ratio, centered, before scaling.
+---
+ src/android/camera_device.cpp          | 92 +++++++++++++++++++++++++-
+ src/android/yuv/post_processor_yuv.cpp | 36 ++++++++--
+ src/android/yuv/post_processor_yuv.h   |  1 +
+ 3 files changed, 122 insertions(+), 7 deletions(-)
+
+diff --git a/src/android/camera_device.cpp b/src/android/camera_device.cpp
+index 74981af..f587e5d 100644
+--- a/src/android/camera_device.cpp
++++ b/src/android/camera_device.cpp
+@@ -232,6 +232,78 @@ bool validateCropRotate(const camera3_stream_configuration_t &streamList)
+ }
+ #endif
+ 
++
++/*
++ * Fold the processed (NV12) stream configurations into a single one, for
++ * cameras that can produce one processed stream only, such as the simple
++ * pipeline handler with the software ISP. The largest configuration (or the
++ * one the JPEG stream is produced from, which needs an exact size match) is
++ * kept, and the Android streams of the others are added to it as Mapped
++ * streams, cropped and downscaled from it by the YUV post-processor.
++ *
++ * Return true if the configurations have been folded.
++ */
++bool foldProcessedStreamConfigs(std::vector<Camera3StreamConfig> &configs,
++				const camera3_stream_t *jpegStream)
++{
++	auto isProcessed = [](const Camera3StreamConfig &c) {
++		return c.config.pixelFormat == formats::NV12;
++	};
++	auto hasJpeg = [&](const Camera3StreamConfig &c) {
++		return jpegStream &&
++		       std::any_of(c.streams.begin(), c.streams.end(),
++				   [&](const Camera3StreamConfig::Camera3Stream &st) {
++					   return st.stream == jpegStream;
++				   });
++	};
++
++	int base = -1;
++	for (int i = 0; i < static_cast<int>(configs.size()); i++) {
++		if (!isProcessed(configs[i]))
++			continue;
++		if (hasJpeg(configs[i])) {
++			base = i;
++			break;
++		}
++		if (base < 0 || configs[base].config.size < configs[i].config.size)
++			base = i;
++	}
++	if (base < 0)
++		return false;
++
++	const Size &baseSize = configs[base].config.size;
++	for (int i = 0; i < static_cast<int>(configs.size()); i++) {
++		if (i == base || !isProcessed(configs[i]))
++			continue;
++		const Size &size = configs[i].config.size;
++		if (size.width > baseSize.width || size.height > baseSize.height ||
++		    hasJpeg(configs[i])) {
++			LOG(HAL, Error) << "Can't derive " << size << " from " << baseSize;
++			return false;
++		}
++	}
++
++	/* The source stream is read by software to produce the others. */
++	configs[base].streams[0].stream->usage |= GRALLOC_USAGE_SW_READ_OFTEN;
++
++	std::vector<Camera3StreamConfig> folded;
++	for (int i = 0; i < static_cast<int>(configs.size()); i++) {
++		if (i == base || !isProcessed(configs[i]))
++			continue;
++		for (auto &st : configs[i].streams) {
++			st.stream->usage |= GRALLOC_USAGE_SW_WRITE_OFTEN;
++			configs[base].streams.push_back({ st.stream, CameraStream::Type::Mapped });
++		}
++	}
++	for (int i = 0; i < static_cast<int>(configs.size()); i++) {
++		if (i == base || !isProcessed(configs[i]))
++			folded.push_back(std::move(configs[i]));
++	}
++	configs = std::move(folded);
++
++	return true;
++}
++
+ } /* namespace */
+ 
+ /*
+@@ -704,6 +776,23 @@ int CameraDevice::configureStreams(camera3_stream_configuration_t *stream_list)
+ 		streamConfigs[index].streams.push_back({ jpegStream, type });
+ 	}
+ 
++	/*
++	 * If the camera rejects the processed streams as a set, try producing
++	 * a single one and deriving the others from it in software.
++	 */
++	if (streamConfigs.size() > 1) {
++		std::unique_ptr<CameraConfiguration> probe = camera_->generateConfiguration();
++		if (probe) {
++			for (const auto &streamConfig : streamConfigs)
++				probe->addConfiguration(streamConfig.config);
++		}
++
++		if (probe && probe->validate() == CameraConfiguration::Invalid &&
++		    foldProcessedStreamConfigs(streamConfigs, jpegStream))
++			LOG(HAL, Info) << "Producing a single processed stream, "
++				       << "deriving the others in software";
++	}
++
+ 	sortCamera3StreamConfigs(streamConfigs, jpegStream);
+ 	for (const auto &streamConfig : streamConfigs) {
+ 		config->addConfiguration(streamConfig.config);
+@@ -723,7 +812,8 @@ int CameraDevice::configureStreams(camera3_stream_configuration_t *stream_list)
+ 			 * be used when constructing the subsequent mapped
+ 			 * streams.
+ 			 */
+-			if (stream.type == CameraStream::Type::Direct)
++			if (stream.type == CameraStream::Type::Direct ||
++			    stream.type == CameraStream::Type::Internal)
+ 				sourceStream = &streams_.back();
+ 		}
+ 	}
+diff --git a/src/android/yuv/post_processor_yuv.cpp b/src/android/yuv/post_processor_yuv.cpp
+index c998807..c564d3f 100644
+--- a/src/android/yuv/post_processor_yuv.cpp
++++ b/src/android/yuv/post_processor_yuv.cpp
+@@ -32,7 +32,8 @@ int PostProcessorYuv::configure(const StreamConfiguration &inCfg,
+ 		return -EINVAL;
+ 	}
+ 
+-	if (inCfg.size < outCfg.size) {
++	if (outCfg.size.width > inCfg.size.width ||
++	    outCfg.size.height > inCfg.size.height) {
+ 		LOG(YUV, Error) << "Up-scaling is not supported"
+ 				<< " (from " << inCfg.size
+ 				<< " to " << outCfg.size << ")";
+@@ -66,11 +67,15 @@ void PostProcessorYuv::process(Camera3RequestDescriptor::StreamBuffer *streamBuf
+ 		return;
+ 	}
+ 
+-	int ret = libyuv::NV12Scale(sourceMapped.planes()[0].data(),
+-				    sourceStride_[0],
+-				    sourceMapped.planes()[1].data(),
+-				    sourceStride_[1],
+-				    sourceSize_.width, sourceSize_.height,
++	/* Centered crop to the destination aspect ratio (even offsets for NV12). */
++	const uint8_t *srcY = sourceMapped.planes()[0].data() +
++			      sourceCrop_.y * sourceStride_[0] + sourceCrop_.x;
++	const uint8_t *srcUV = sourceMapped.planes()[1].data() +
++			       sourceCrop_.y / 2 * sourceStride_[1] + sourceCrop_.x;
++
++	int ret = libyuv::NV12Scale(srcY, sourceStride_[0],
++				    srcUV, sourceStride_[1],
++				    sourceCrop_.width, sourceCrop_.height,
+ 				    destination->plane(0).data(),
+ 				    destinationStride_[0],
+ 				    destination->plane(1).data(),
+@@ -133,6 +138,25 @@ void PostProcessorYuv::calculateLengths(const StreamConfiguration &inCfg,
+ 	sourceSize_ = inCfg.size;
+ 	destinationSize_ = outCfg.size;
+ 
++	/*
++	 * Crop the source to the aspect ratio of the destination, centered,
++	 * so that streams derived from a larger one are not distorted.
++	 */
++	sourceCrop_ = Rectangle(sourceSize_);
++	const uint64_t lhs = static_cast<uint64_t>(sourceSize_.width) * destinationSize_.height;
++	const uint64_t rhs = static_cast<uint64_t>(destinationSize_.width) * sourceSize_.height;
++	if (lhs > rhs) {
++		/* Source is wider: crop the sides. */
++		unsigned int width = rhs / destinationSize_.height & ~1u;
++		sourceCrop_.x = (sourceSize_.width - width) / 2 & ~1;
++		sourceCrop_.width = width;
++	} else if (lhs < rhs) {
++		/* Source is taller: crop top and bottom. */
++		unsigned int height = lhs / destinationSize_.width & ~1u;
++		sourceCrop_.y = (sourceSize_.height - height) / 2 & ~1;
++		sourceCrop_.height = height;
++	}
++
+ 	const PixelFormatInfo &nv12Info = PixelFormatInfo::info(formats::NV12);
+ 	for (unsigned int i = 0; i < 2; i++) {
+ 		sourceStride_[i] = inCfg.stride;
+diff --git a/src/android/yuv/post_processor_yuv.h b/src/android/yuv/post_processor_yuv.h
+index ed7bb1f..4a09bad 100644
+--- a/src/android/yuv/post_processor_yuv.h
++++ b/src/android/yuv/post_processor_yuv.h
+@@ -27,6 +27,7 @@ private:
+ 			      const libcamera::StreamConfiguration &outCfg);
+ 
+ 	libcamera::Size sourceSize_;
++	libcamera::Rectangle sourceCrop_;
+ 	libcamera::Size destinationSize_;
+ 	unsigned int sourceLength_[2] = {};
+ 	unsigned int destinationLength_[2] = {};
+-- 
+2.55.0
+

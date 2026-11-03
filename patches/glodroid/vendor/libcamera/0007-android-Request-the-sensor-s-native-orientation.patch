@@ -1,0 +1,53 @@
+From ebcee9515cc7d5086a028cafae16f3f5d7730191 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 23:00:36 -0600
+Subject: [PATCH 7/9] android: Request the sensor's native orientation
+
+Android expects images in the native orientation of the sensor and tells
+applications how to rotate them through ANDROID_SENSOR_ORIENTATION, but
+the HAL leaves the configuration at the default orientation (Rotate0).
+For a sensor mounted at 90 or 270 degrees that orientation needs a
+transpose, which sensors can't do, so validate() adjusts the orientation
+and reports the configuration as Adjusted, which the HAL rejects.
+
+Request the orientation corresponding to the camera's Rotation property.
+---
+ src/android/camera_device.cpp | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/android/camera_device.cpp b/src/android/camera_device.cpp
+index f587e5d..0c54d92 100644
+--- a/src/android/camera_device.cpp
++++ b/src/android/camera_device.cpp
+@@ -23,6 +23,7 @@
+ #include <libcamera/fence.h>
+ #include <libcamera/formats.h>
+ #include <libcamera/geometry.h>
++#include <libcamera/orientation.h>
+ #include <libcamera/property_ids.h>
+ 
+ #include "system/graphics.h"
+@@ -818,6 +819,20 @@ int CameraDevice::configureStreams(camera3_stream_configuration_t *stream_list)
+ 		}
+ 	}
+ 
++	/*
++	 * Android expects images in the sensor's native orientation and tells
++	 * applications how to rotate them through ANDROID_SENSOR_ORIENTATION.
++	 * Request that orientation: the default (Rotate0) can't be produced by
++	 * sensors mounted at 90 or 270 degrees, which can't transpose, and
++	 * validate() would then adjust it, failing the configuration.
++	 */
++	const auto &rotation = camera_->properties().get(properties::Rotation);
++	if (rotation) {
++		std::optional<Orientation> native = orientationFromRotation(*rotation);
++		if (native)
++			config->orientation = *native;
++	}
++
+ 	switch (config->validate()) {
+ 	case CameraConfiguration::Valid:
+ 		break;
+-- 
+2.55.0
+

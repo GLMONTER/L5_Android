@@ -19,3 +19,6 @@
 
 # BM818 modem: USB serial ports (option driver); the radio HAL (user radio) uses the AT port
 /dev/ttyUSB*              0660   radio      radio
+
+# Cameras: media controller, sensor/CSI/VCM/flash subdevs (camera provider runs as cameraserver)
+/dev/v4l-subdev*          0660   system     camera

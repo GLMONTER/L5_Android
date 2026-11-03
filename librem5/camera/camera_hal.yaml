@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# libcamera Android HAL configuration (/vendor/etc/libcamera/camera_hal.yaml). The HAL only
+# exposes internal cameras listed here. Keys are libcamera camera IDs (device-tree paths).
+# Location and rotation also come from the device tree (rotation/orientation properties on
+# the sensor nodes), which libcamera prefers; these values match it. "rotation" is the
+# Android sensor orientation: degrees clockwise to turn the image upright in portrait.
+cameras:
+  # Rear: Samsung S5K3L6XX, 13 MP, I2C3 0x2d (DT rotation 270 -> Android 90)
+  "/base/soc@0/bus@30800000/i2c@30a50000/camera@2d":
+    location: back
+    rotation: 90
+
+  # Front: Hynix HI846, 8 MP, I2C2 0x20 (DT rotation 90 -> Android 270)
+  "/base/soc@0/bus@30800000/i2c@30a40000/camera@20":
+    location: front
+    rotation: 270

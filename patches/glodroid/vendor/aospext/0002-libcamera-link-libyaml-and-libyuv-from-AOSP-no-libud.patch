@@ -1,0 +1,35 @@
+From 4498a7b5e5e4a40078a5b25d9e12d4c029a17c3e Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 18:43:46 -0600
+Subject: [PATCH] libcamera: link libyaml and libyuv from AOSP, no libudev
+
+libcamera needs libyaml for its configuration and tuning files and libyuv
+for the Android adaptation layer. Both are in AOSP (libyaml through the
+device's libyaml_vendor shared wrapper); without them meson falls back to
+downloading subprojects, which an AOSP build cannot do. AOSP has no
+libudev: build with -Dudev=disabled (sysfs device enumeration).
+
+The Android HAL's generic buffer allocator uses libui's
+GraphicBufferAllocator, so link libui (and libutils) as well.
+---
+ meson_libcamera.mk | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/meson_libcamera.mk b/meson_libcamera.mk
+index 7f08597..d03edcf 100644
+--- a/meson_libcamera.mk
++++ b/meson_libcamera.mk
+@@ -13,8 +13,8 @@ include $(LOCAL_PATH)/aospext_cleanup.mk
+ AOSPEXT_PROJECT_NAME := LIBCAMERA
+ AOSPEXT_BUILD_SYSTEM := meson
+ 
+-LOCAL_SHARED_LIBRARIES := libc libexif libjpeg libdl libudev libevent libcrypto
+-AOSPEXT_GEN_PKGCONFIGS := libexif libjpeg dl libudev libevent_pthreads libcrypto
++LOCAL_SHARED_LIBRARIES := libc libexif libjpeg libdl libevent libcrypto libyaml_vendor libyuv libui libutils
++AOSPEXT_GEN_PKGCONFIGS := libexif libjpeg dl libevent_pthreads libcrypto yaml-0.1 libyuv libui
+ 
+ MESON_BUILD_ARGUMENTS := \
+     -Dwerror=false                                                           \
+-- 
+2.55.0
+
