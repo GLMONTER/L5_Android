@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# libcamera software ISP tuning for the Librem 5 Samsung S5K3L6XX (rear)
+# (installed as /vendor/etc/shared/libcamera/ipa/softisp/s5k3l6xx.yaml, picked by sensor name).
+#
+# Black level: from the camera sensor helper (64 at 10 bits; Purism's Millipixels uses 0.0628).
+# CCM: camera RGB (white balanced) -> linear sRGB, computed from the DNG ForwardMatrix in
+# Purism's Millipixels config (config/purism,librem5r4.ini): XYZ(D50)->sRGB (Bradford) x
+# ForwardMatrix, rows normalised to 1 so white is preserved. One matrix for all colour
+# temperatures until per-illuminant calibration exists.
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+  - Awb:
+  - Ccm:
+      ccms:
+        - ct: 5000
+          ccm: [ 1.512, -0.685,  0.172,
+                -0.087,  1.143, -0.056,
+                -0.018, -0.101,  1.119 ]
+  - Adjust:
+  - Agc:
+...

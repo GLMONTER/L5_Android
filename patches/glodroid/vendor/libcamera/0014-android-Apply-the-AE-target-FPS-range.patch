@@ -1,0 +1,62 @@
+From 20c89ff38ea3b6ce5bb3b064956de120b359588e Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 23:51:39 -0600
+Subject: [PATCH 14/14] android: Apply the AE target FPS range
+
+The HAL ignores ANDROID_CONTROL_AE_TARGET_FPS_RANGE, so applications
+have no say in how far the frame duration may be extended in low light.
+
+Translate the range into the FrameDurationLimits control. Advertise
+ranges with a lower bound of at least 15 FPS: the {min, max} range is
+the one the preview template requests, and with the lower bound derived
+from the sensor's maximum frame duration (around 1 FPS) the preview
+would drop to unusable frame rates in the dark.
+---
+ src/android/camera_capabilities.cpp |  9 +++++++++
+ src/android/camera_device.cpp       | 10 ++++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/src/android/camera_capabilities.cpp b/src/android/camera_capabilities.cpp
+index 22da589..8a700a7 100644
+--- a/src/android/camera_capabilities.cpp
++++ b/src/android/camera_capabilities.cpp
+@@ -1407,6 +1407,15 @@ int CameraCapabilities::initializeStaticMetadata()
+ 	 * smaller than 10^9 / minFps.
+ 	 */
+ 	int32_t minFps = std::ceil(1e9 / maxFrameDuration_);
++
++	/*
++	 * Don't let AE drop below 15 FPS in low light: the {min, max} range is
++	 * the one the preview template uses, and AE extends the frame duration
++	 * up to 1 / min. Longer exposures make the preview unusable.
++	 */
++	constexpr int32_t kMinAeFps = 15;
++	minFps = std::min(std::max(minFps, kMinAeFps), maxYUVFps);
++
+ 	int32_t availableAeFpsTarget[] = {
+ 		minFps, maxYUVFps, maxYUVFps, maxYUVFps,
+ 	};
+diff --git a/src/android/camera_device.cpp b/src/android/camera_device.cpp
+index e97ed8e..ed89fd4 100644
+--- a/src/android/camera_device.cpp
++++ b/src/android/camera_device.cpp
+@@ -928,6 +928,16 @@ int CameraDevice::processControls(Camera3RequestDescriptor *descriptor)
+ 		controls.set(controls::ScalerCrop, cropRegion);
+ 	}
+ 
++	/* AE target FPS range -> frame duration limits (in microseconds). */
++	if (isSupported(controls::FrameDurationLimits) &&
++	    settings.getEntry(ANDROID_CONTROL_AE_TARGET_FPS_RANGE, &entry) &&
++	    entry.count == 2 && entry.data.i32[0] > 0 && entry.data.i32[1] > 0) {
++		const int64_t minFrameDuration = 1000000 / entry.data.i32[1];
++		const int64_t maxFrameDuration = 1000000 / entry.data.i32[0];
++		controls.set(controls::FrameDurationLimits,
++			     { minFrameDuration, maxFrameDuration });
++	}
++
+ 	if (isSupported(controls::draft::FaceDetectMode) &&
+ 	    settings.getEntry(ANDROID_STATISTICS_FACE_DETECT_MODE, &entry)) {
+ 		const uint8_t *data = entry.data.u8;
+-- 
+2.55.0
+

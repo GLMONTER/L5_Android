@@ -1,0 +1,29 @@
+From 6717a3cf6f0f7b38f383e8bf442b347d4b39bb1e Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 23:45:33 -0600
+Subject: [PATCH 9/9] arm64: dts: imx8mq-librem5: set an initial focus for the
+ rear camera
+
+Set the DW9714 voice coil motor of the rear camera to position 250, the
+default manual focus of Purism's Millipixels camera application, instead
+of its rest position (0), until autofocus is driven from userspace.
+---
+ arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi b/arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi
+index c371e23bf..eda728470 100644
+--- a/arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi
++++ b/arch/arm64/boot/dts/freescale/imx8mq-librem5.dtsi
+@@ -1491,6 +1491,8 @@ voice_coil_motor: vcm@c {
+ 		compatible = "dongwoon,dw9714";
+ 		reg = <0x0c>;
+ 		vcc-supply = <&reg_csi_1v8>;
++		/* fixed focus while there is no autofocus: Millipixels' default manual focus */
++		dongwoon,initial-position = <250>;
+ 	};
+ 
+ 	/* Samsung S5K3L6XX - 13MP Rear-Facing Camera */
+-- 
+2.55.0
+

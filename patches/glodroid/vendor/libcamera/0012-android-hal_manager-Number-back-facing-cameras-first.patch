@@ -1,0 +1,77 @@
+From efa227a6eb974df735b03c0d5877af4783666cb5 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 23:32:38 -0600
+Subject: [PATCH] android: hal_manager: Number back-facing cameras first
+
+Internal cameras get their HAL IDs in the order the camera manager adds
+them, which follows the enumeration of the media devices. On the Librem 5
+the front camera comes first and becomes camera 0, while Android
+applications (and the legacy Camera API's default) expect camera 0 to be
+the main back-facing camera.
+
+Add the cameras present when the HAL starts sorted by location, back
+first, then front, then the others, and connect the hotplug signals
+afterwards. The camera service only learns the IDs once it has set the
+module callbacks, which happens after initialisation.
+---
+ src/android/camera_hal_manager.cpp | 30 ++++++++++++++++++++++++++----
+ 1 file changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/src/android/camera_hal_manager.cpp b/src/android/camera_hal_manager.cpp
+index 03d1710..432537d 100644
+--- a/src/android/camera_hal_manager.cpp
++++ b/src/android/camera_hal_manager.cpp
+@@ -7,6 +7,8 @@
+ 
+ #include "camera_hal_manager.h"
+ 
++#include <algorithm>
++
+ #include <libcamera/base/log.h>
+ 
+ #include <libcamera/camera.h>
+@@ -57,10 +59,6 @@ int CameraHalManager::init()
+ 		return -EINVAL;
+ 	}
+ 
+-	/* Support camera hotplug. */
+-	cameraManager_->cameraAdded.connect(this, &CameraHalManager::cameraAdded);
+-	cameraManager_->cameraRemoved.connect(this, &CameraHalManager::cameraRemoved);
+-
+ 	int ret = cameraManager_->start();
+ 	if (ret) {
+ 		LOG(HAL, Error) << "Failed to start camera manager: "
+@@ -69,6 +67,30 @@ int CameraHalManager::init()
+ 		return ret;
+ 	}
+ 
++	/*
++	 * Add the cameras present at startup with the back-facing ones first,
++	 * as Android applications expect camera 0 to be the main rear camera
++	 * (the enumeration order follows the media devices, not the facing).
++	 * The camera service learns the IDs only once its callbacks are set.
++	 */
++	std::vector<std::shared_ptr<Camera>> cameras = cameraManager_->cameras();
++	auto rank = [](const std::shared_ptr<Camera> &cam) {
++		const auto &location = cam->properties().get(properties::Location);
++		if (location == properties::LocationBack)
++			return 0;
++		if (location == properties::LocationFront)
++			return 1;
++		return 2;
++	};
++	std::stable_sort(cameras.begin(), cameras.end(),
++			 [&](const auto &a, const auto &b) { return rank(a) < rank(b); });
++	for (const std::shared_ptr<Camera> &cam : cameras)
++		cameraAdded(cam);
++
++	/* Support camera hotplug. */
++	cameraManager_->cameraAdded.connect(this, &CameraHalManager::cameraAdded);
++	cameraManager_->cameraRemoved.connect(this, &CameraHalManager::cameraRemoved);
++
+ 	return 0;
+ }
+ 
+-- 
+2.55.0
+

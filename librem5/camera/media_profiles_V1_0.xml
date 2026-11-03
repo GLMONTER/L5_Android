@@ -2,14 +2,14 @@
 <!-- SPDX-License-Identifier: Apache-2.0
 
      Camcorder profiles for the Librem 5 (vendor/etc/media_profiles_V1_0.xml), structure from
-     AOSP's/GloDroid's media_profiles_V1_0.xml. Camera IDs follow the libcamera HAL enumeration
-     order (CSI bridge order): 0 = front HI846, 1 = rear S5K3L6XX. Every profile size must be
+     AOSP's/GloDroid's media_profiles_V1_0.xml. Camera IDs: the libcamera HAL numbers back-facing
+     cameras first: 0 = rear S5K3L6XX, 1 = front HI846. Every profile size must be
      one the camera advertises (the front camera stops at 1600x1224, so no 1080p there).
      Video is encoded in software (c2.android.avc.encoder). -->
 <!DOCTYPE MediaSettings SYSTEM "/system/etc/media_profiles_V1_0.dtd">
 <MediaSettings>
     <!-- Front: Hynix HI846 -->
-    <CamcorderProfiles cameraId="0">
+    <CamcorderProfiles cameraId="1">
         <EncoderProfile quality="low" fileFormat="mp4" duration="30">
             <Video codec="h264" bitRate="512000" width="320" height="240" frameRate="30" />
             <Audio codec="aac" bitRate="96000" sampleRate="48000" channels="1" />
@@ -37,7 +37,7 @@
     </CamcorderProfiles>
 
     <!-- Rear: Samsung S5K3L6XX -->
-    <CamcorderProfiles cameraId="1">
+    <CamcorderProfiles cameraId="0">
         <EncoderProfile quality="low" fileFormat="mp4" duration="30">
             <Video codec="h264" bitRate="512000" width="320" height="240" frameRate="30" />
             <Audio codec="aac" bitRate="96000" sampleRate="48000" channels="1" />

@@ -1,0 +1,68 @@
+From b5199a96c237a97a464a7371c8b7eb1da76b66f9 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 23:45:33 -0600
+Subject: [PATCH 8/9] media: i2c: dw9714: add an optional initial lens position
+
+The lens position starts at 0 and the driver moves the lens to it on
+every power up. On a camera without autofocus control in userspace (the
+Librem 5 rear camera with libcamera's software ISP) the lens then stays
+at its mechanical rest position, and near and mid-range subjects are
+out of focus.
+
+Read an optional "dongwoon,initial-position" property for the initial
+position and the default of V4L2_CID_FOCUS_ABSOLUTE.
+---
+ drivers/media/i2c/dw9714.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/dw9714.c b/drivers/media/i2c/dw9714.c
+index f97c316f3..49c852c2d 100644
+--- a/drivers/media/i2c/dw9714.c
++++ b/drivers/media/i2c/dw9714.c
+@@ -6,6 +6,7 @@
+ #include <linux/i2c.h>
+ #include <linux/module.h>
+ #include <linux/pm_runtime.h>
++#include <linux/property.h>
+ #include <linux/regulator/consumer.h>
+ #include <media/v4l2-ctrls.h>
+ #include <media/v4l2-device.h>
+@@ -129,8 +130,10 @@ static int dw9714_init_controls(struct dw9714_device *dev_vcm)
+ 
+ 	v4l2_ctrl_handler_init(hdl, 1);
+ 
++	/* The lens is moved to current_val on power up (see dw9714_vcm_resume) */
+ 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_FOCUS_ABSOLUTE,
+-			  0, DW9714_MAX_FOCUS_POS, DW9714_FOCUS_STEPS, 0);
++			  0, DW9714_MAX_FOCUS_POS, DW9714_FOCUS_STEPS,
++			  dev_vcm->current_val);
+ 
+ 	if (hdl->error)
+ 		dev_err(dev_vcm->sd.dev, "%s fail error: 0x%x\n",
+@@ -164,6 +167,7 @@ static int dw9714_power_down(struct dw9714_device *dw9714_dev)
+ static int dw9714_probe(struct i2c_client *client)
+ {
+ 	struct dw9714_device *dw9714_dev;
++	u32 initial_position;
+ 	int rval;
+ 
+ 	dw9714_dev = devm_kzalloc(&client->dev, sizeof(*dw9714_dev),
+@@ -175,6 +179,15 @@ static int dw9714_probe(struct i2c_client *client)
+ 	if (IS_ERR(dw9714_dev->vcc))
+ 		return PTR_ERR(dw9714_dev->vcc);
+ 
++	/*
++	 * Optional initial lens position, for cameras without autofocus
++	 * control: the default 0 leaves the lens at its mechanical rest position.
++	 */
++	if (!device_property_read_u32(&client->dev, "dongwoon,initial-position",
++				      &initial_position))
++		dw9714_dev->current_val = min_t(u32, initial_position,
++						DW9714_MAX_FOCUS_POS);
++
+ 	dw9714_dev->powerdown_gpio = devm_gpiod_get_optional(&client->dev,
+ 							     "powerdown",
+ 							     GPIOD_OUT_HIGH);
+-- 
+2.55.0
+

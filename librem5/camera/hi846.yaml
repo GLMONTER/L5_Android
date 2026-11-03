@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# libcamera software ISP tuning for the Librem 5 Hynix HI846 (front)
+# (installed as /vendor/etc/shared/libcamera/ipa/softisp/hi846.yaml, picked by sensor name).
+#
+# Black level: from the camera sensor helper (64 at 10 bits; Purism's Millipixels uses 0.0628).
+# CCM: camera RGB (white balanced) -> linear sRGB, computed from the DNG ForwardMatrix in
+# Purism's Millipixels config (config/purism,librem5r4.ini): XYZ(D50)->sRGB (Bradford) x
+# ForwardMatrix, rows normalised to 1 so white is preserved. One matrix for all colour
+# temperatures until per-illuminant calibration exists.
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+  - Awb:
+  - Ccm:
+      ccms:
+        - ct: 5000
+          ccm: [ 1.538, -0.471, -0.067,
+                -0.348,  1.670, -0.322,
+                -0.064, -0.463,  1.527 ]
+  - Adjust:
+  - Agc:
+...
