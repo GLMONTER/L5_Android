@@ -21,7 +21,8 @@ patches and config, and the scripts to build and flash. Nothing else is modified
 | GPS (GPS + GLONASS) | ST Teseo receiver on UART2, NMEA GNSS HAL in `librem5/gnss` |
 | Video playback (H.264, HEVC, VP8, VP9, AV1), camera video recording (720p H.264 + AAC) | Android's software codecs; 1080p30 H.264 plays in real time |
 | SELinux enforcing | device policy in `librem5/sepolicy`; `SELINUX_MODE=permissive scripts/build.sh` to debug |
-| Battery/charging, buttons, vibration, USB adb | |
+| Battery/charging, buttons, vibration | |
+| USB: adb, file transfer (MTP/PTP), USB tethering, host mode (flash drives) | USB-C roles switch automatically (TPS6598x); kernel patch 0011 |
 | Suspend/resume | deep suspend works, but the phone occasionally hangs after a resume (being investigated, see Power below) |
 | Modem (BM818): radio HAL, IMEI/baseband, SIM state, airplane mode; Phone + Messages | AT-command AIDL HAL in `librem5/radio` (fork of goldfish's ranchu HAL) |
 | Earpiece | WM8962 SPKOUTR (Purism UCM "Handset1") |
@@ -132,6 +133,15 @@ Hardware quirks found during bring-up (details in commit messages and file comme
   default GNSS HAL only simulates; `librem5/gnss` parses the NMEA. Android 17's GNSS JNI calls
   into every extension the HAL returns, even the nullable ones, so the HAL returns no-op
   objects for all of them.
+- USB: Android only creates its USB device manager (function switching: MTP, PTP, tethering)
+  when `/sys/class/android_usb` exists, which comes from an Android kernel patch; kernel patch
+  0011 ports it from the Android common kernel (android16-6.12) and accepts the `none` UDC name
+  GloDroid's gadget HAL writes. USB drives need the FAT code pages built in (no on-demand module
+  loading): vfat mounts failed with "codepage cp437 not found".
+- Compass: the LSM9DS1 magnetometer sees a ~750 uT hard-iron offset (the speaker magnet). The
+  sensors HAL calibrates it online from each axis' range (turn the phone through all
+  orientations once) and keeps the offset in `/data/vendor/sensors` across reboots; calibrated,
+  it reads Earth's ~50 uT.
 - Video: the software codec service's seccomp policy lacks syscalls Mesa makes when minigbm
   maps a frame (`librem5/codecs/mediaswcodec.policy`), and encoders fed from a Surface need
   `debug.stagefright.c2inputsurface=-1`. Recording stops at 720p: at 1080p the software encoder

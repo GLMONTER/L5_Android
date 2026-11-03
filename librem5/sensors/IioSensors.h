@@ -90,7 +90,9 @@ class IioGyroSensor : public IioVec3Sensor {
 
 // LSM9DS1 magnetometer with online hard-iron calibration: the offset (speaker magnet etc., several
 // gauss here) is the midpoint of each axis' observed min/max. Accuracy stays UNRELIABLE until every
-// axis has swept a range consistent with Earth's field, which a figure-8 motion provides.
+// axis has swept a range consistent with Earth's field, which a figure-8 motion provides. The
+// offset is saved in /data/vendor/sensors and restored at start, so the compass is usable right
+// after a reboot.
 class IioMagnetometerSensor : public IioVec3Sensor {
   public:
     IioMagnetometerSensor(int32_t sensorHandle, ISensorsEventCallback* callback);
@@ -99,8 +101,14 @@ class IioMagnetometerSensor : public IioVec3Sensor {
     void readEventPayload(EventPayload& payload) override;
 
   private:
+    void loadCalibration();
+    void saveCalibration(const double offset[3]);
+
     double mMin[3] = {1e9, 1e9, 1e9};
     double mMax[3] = {-1e9, -1e9, -1e9};
+    double mSavedOffset[3] = {0, 0, 0};
+    bool mHaveSaved = false;
+    int64_t mLastSaveNs = 0;
 };
 
 class IioLightSensor : public OnChangeSensor {

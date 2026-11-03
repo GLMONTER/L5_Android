@@ -3,3 +3,7 @@ service vendor.sensors-librem5 /vendor/bin/hw/android.hardware.sensors-service.l
     user system
     group system input
     rlimit rtprio 10 10
+
+# Saved magnetometer calibration (hard-iron offset)
+on post-fs-data
+    mkdir /data/vendor/sensors 0770 system system

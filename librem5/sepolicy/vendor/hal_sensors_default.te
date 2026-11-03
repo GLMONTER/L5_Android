@@ -3,3 +3,7 @@ allow hal_sensors_default sysfs_iio:dir r_dir_perms;
 allow hal_sensors_default sysfs_iio:lnk_file read;
 allow hal_sensors_default sysfs_iio:file rw_file_perms;
 get_prop(hal_sensors_default, vendor_sensors_prop)
+
+# Saved magnetometer calibration
+allow hal_sensors_default sensors_vendor_data_file:dir rw_dir_perms;
+allow hal_sensors_default sensors_vendor_data_file:file create_file_perms;

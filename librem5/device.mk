@@ -130,6 +130,9 @@ PRODUCT_COPY_FILES += \
 # surface, the software Codec2 service has none (CCodec::createInputSurface crashes otherwise)
 PRODUCT_VENDOR_PROPERTIES += debug.stagefright.c2inputsurface=-1
 
+# Bigger log buffers (default 256 KiB): boot-time HAL messages were rotated out within a minute
+PRODUCT_VENDOR_PROPERTIES += ro.logd.size=2M
+
 # GNSS: NMEA receiver on /dev/gnss0 (gnss/)
 PRODUCT_PACKAGES += android.hardware.gnss-service.librem5
 PRODUCT_COPY_FILES += \

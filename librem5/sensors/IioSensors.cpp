@@ -31,6 +31,7 @@
 #include <android-base/properties.h>
 #include <android-base/strings.h>
 #include <log/log.h>
+#include <utils/SystemClock.h>
 
 namespace aidl {
 namespace android {
@@ -257,10 +258,54 @@ IioMagnetometerSensor::IioMagnetometerSensor(int32_t sensorHandle, ISensorsEvent
             ALOGW("could not set magnetometer scale %s", widest.c_str());
         }
     }
+    loadCalibration();
     mSensorInfo.vendor = "STMicroelectronics";
     mSensorInfo.resolution = 0.06f;      // uT (0.584 mgauss/LSB at +/-16 gauss)
     mSensorInfo.power = 0.08f;
     mSensorInfo.minDelayUs = 25 * 1000;  // 40 Hz
+}
+
+namespace {
+constexpr char kMagnCalibrationFile[] = "/data/vendor/sensors/magnetometer_offset";
+// A restored offset counts as calibrated: seed each axis' range +/- Earth's field (~50 uT), so the
+// first readings don't drag the midpoint; the range only widens when the field really exceeds it
+constexpr double kRestoredHalfSpanUt = 50.0;
+// Save when the offset moved this much, at most this often
+constexpr double kSaveThresholdUt = 2.0;
+constexpr int64_t kSaveIntervalNs = 60LL * 1000 * 1000 * 1000;
+}  // namespace
+
+void IioMagnetometerSensor::loadCalibration() {
+    std::string s;
+    double o[3];
+    if (!::android::base::ReadFileToString(kMagnCalibrationFile, &s) ||
+        sscanf(s.c_str(), "%lf %lf %lf", &o[0], &o[1], &o[2]) != 3) {
+        return;
+    }
+    for (int i = 0; i < 3; i++) {
+        mMin[i] = o[i] - kRestoredHalfSpanUt;
+        mMax[i] = o[i] + kRestoredHalfSpanUt;
+        mSavedOffset[i] = o[i];
+    }
+    mHaveSaved = true;
+    ALOGI("magnetometer offset restored: %.1f %.1f %.1f uT", o[0], o[1], o[2]);
+}
+
+void IioMagnetometerSensor::saveCalibration(const double offset[3]) {
+    const int64_t now = ::android::elapsedRealtimeNano();
+    bool moved = !mHaveSaved;
+    for (int i = 0; i < 3; i++) moved |= std::abs(offset[i] - mSavedOffset[i]) > kSaveThresholdUt;
+    if (!moved || now - mLastSaveNs < kSaveIntervalNs) return;
+
+    char buf[96];
+    snprintf(buf, sizeof(buf), "%.2f %.2f %.2f\n", offset[0], offset[1], offset[2]);
+    const std::string tmp = std::string(kMagnCalibrationFile) + ".tmp";
+    if (!::android::base::WriteStringToFile(buf, tmp) || rename(tmp.c_str(), kMagnCalibrationFile)) {
+        ALOGW("could not save the magnetometer offset");
+    }
+    for (int i = 0; i < 3; i++) mSavedOffset[i] = offset[i];
+    mHaveSaved = true;
+    mLastSaveNs = now;
 }
 
 void IioMagnetometerSensor::readEventPayload(EventPayload& payload) {
@@ -277,6 +322,11 @@ void IioMagnetometerSensor::readEventPayload(EventPayload& payload) {
         mMax[i] = std::max(mMax[i], v[i]);
         if (mMax[i] - mMin[i] < kMinSpanUt) calibrated = false;
         out[i] = v[i] - (mMax[i] + mMin[i]) / 2;
+    }
+    if (calibrated) {
+        const double offset[3] = {(mMax[0] + mMin[0]) / 2, (mMax[1] + mMin[1]) / 2,
+                                  (mMax[2] + mMin[2]) / 2};
+        saveCalibration(offset);
     }
     EventPayload::Vec3 vec3 = {
             .x = static_cast<float>(out[0]),
