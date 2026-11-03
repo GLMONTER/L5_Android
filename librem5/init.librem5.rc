@@ -12,3 +12,21 @@ on boot
 
     # Haptics: pwm-vibrator is exposed as a force-feedback input device
     chown system system /sys/class/leds/vibrator/brightness
+
+# Wi-Fi/Bluetooth kill switch (vendor.librem5.wlan_hks from librem5-hks-monitor). The switch cuts
+# the power of the BCM43752 combo chip. Wi-Fi comes back by itself; Bluetooth needs the chip's
+# boot-time power sequence and its UART driver loaded again, as at boot: reset the SDIO host
+# (mmc1, 30b50000.mmc, never the eMMC), wait for Wi-Fi, then reload hci_uart.
+on property:vendor.librem5.wlan_hks=blocked
+    stop vendor.bluetooth-default
+
+on property:vendor.librem5.wlan_hks=unblocked
+    stop vendor.bluetooth-default
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -r -d /vendor_dlkm/lib/modules hci_uart btbcm
+    write /sys/bus/platform/drivers/sdhci-esdhc-imx/unbind 30b50000.mmc
+    write /sys/bus/platform/drivers/sdhci-esdhc-imx/bind 30b50000.mmc
+    wait /sys/class/net/wlan0 15
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -a -d /vendor_dlkm/lib/modules \
+        bluetooth btbcm hci_uart
+    start vendor.bluetooth-default
+    setprop vendor.librem5.wlan_hks on

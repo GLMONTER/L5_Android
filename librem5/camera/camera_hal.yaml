@@ -5,11 +5,14 @@
 # Location and rotation also come from the device tree (rotation/orientation properties on
 # the sensor nodes), which libcamera prefers; these values match it. "rotation" is the
 # Android sensor orientation: degrees clockwise to turn the image upright in portrait.
+# "flash-led" (optional) names the LED class device of the camera's flash LED (torch mode).
 cameras:
   # Rear: Samsung S5K3L6XX, 13 MP, I2C3 0x2d (DT rotation 270 -> Android 90)
   "/base/soc@0/bus@30800000/i2c@30a50000/camera@2d":
     location: back
     rotation: 90
+    # LM3560 flash LED (I2C1 0x53), used as a torch
+    flash-led: "white:torch"
 
   # Front: Hynix HI846, 8 MP, I2C2 0x20 (DT rotation 90 -> Android 270)
   "/base/soc@0/bus@30800000/i2c@30a40000/camera@20":

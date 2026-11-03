@@ -22,3 +22,6 @@
 
 # Cameras: media controller, sensor/CSI/VCM/flash subdevs (camera provider runs as cameraserver)
 /dev/v4l-subdev*          0660   system     camera
+
+# Camera torch: the LM3560 flash LED, written by the camera provider (user cameraserver, group camera)
+/sys/devices/platform/soc@0/30800000.bus/30a30000.i2c/i2c-1/1-0053/leds/white:torch  brightness  0664  system  camera

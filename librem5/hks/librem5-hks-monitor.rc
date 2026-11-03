@@ -1,0 +1,4 @@
+service vendor.hks-monitor /vendor/bin/librem5-hks-monitor
+    class core
+    user system
+    group bluetooth

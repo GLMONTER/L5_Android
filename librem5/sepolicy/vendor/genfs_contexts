@@ -46,3 +46,9 @@ genfscon sysfs /devices/platform/soc@0/30800000.bus/30a20000.i2c/i2c-0/0-003f/ex
 # Console log level (GloDroid init.common.rc writes it from vendor_init) and the USB-C PHY extcon
 genfscon proc /sys/kernel/printk                                                  u:object_r:proc_printk:s0
 genfscon sysfs /devices/platform/soc@0/382f0040.usb-phy/extcon                             u:object_r:sysfs_extcon:s0
+
+# LM3560 flash LED (i2c-1 0x53): camera torch, written by the camera HAL
+genfscon sysfs /devices/platform/soc@0/30800000.bus/30a30000.i2c/i2c-1/1-0053/leds          u:object_r:sysfs_leds:s0
+
+# i.MX SDHC driver bind/unbind: init resets the Wi-Fi/BT SDIO host after the kill switch
+genfscon sysfs /bus/platform/drivers/sdhci-esdhc-imx                                        u:object_r:sysfs_sdio_host:s0

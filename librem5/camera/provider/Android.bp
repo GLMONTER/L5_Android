@@ -12,6 +12,8 @@
 //  - LibcameraDeviceSession.cpp: freeReleaseFences() double-freed a native handle (provider abort
 //    once results arrive from more than one thread), and the makeFromAidl() wrappers of request
 //    buffers and acquire fences leaked on every request
+//  - LibcameraDevice.cpp: torch strength levels through functions libcamera's HAL module exports
+//    (the camera3 module API has none)
 // This build file and the .rc/.xml next to it install the service into /vendor instead of an APEX.
 
 package {

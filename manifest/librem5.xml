@@ -24,7 +24,7 @@
   <project path="glodroid/vendor/aospext" remote="glodroid" name="aospext.git" revision="8c3075ffb6005b1c317e69d4da4071dc2403e0f9" />
 
   <!-- Graphics -->
-  <project path="glodroid/vendor/mesa3d"         remote="fdo"  name="mesa/mesa.git"                     revision="refs/tags/mesa-26.2.6" clone-depth="1" />
+  <project path="glodroid/vendor/mesa3d"         remote="fdo"  name="mesa/mesa.git"                     revision="refs/tags/mesa-26.3.0-rc3" clone-depth="1" />
   <project path="glodroid/vendor/drm_hwcomposer" remote="fdo"  name="drm-hwcomposer/drm-hwcomposer.git" revision="4cd81af6434843848a30a687ec8de46d6fd9d2ea" />
   <project path="glodroid/vendor/minigbm"        remote="aosp" name="platform/external/minigbm"         revision="93e16b90294c4634d43c4987f194204ac3b80ac8" />
 

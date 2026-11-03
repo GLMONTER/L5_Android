@@ -1,0 +1,12 @@
+// Librem 5 hardware kill switch monitor: Bluetooth recovery after the Wi-Fi/BT switch
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_binary {
+    name: "librem5-hks-monitor",
+    vendor: true,
+    srcs: ["hks_monitor.cpp"],
+    shared_libs: ["libbase", "liblog"],
+    init_rc: ["librem5-hks-monitor.rc"],
+}

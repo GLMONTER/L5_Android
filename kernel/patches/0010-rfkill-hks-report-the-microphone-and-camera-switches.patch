@@ -1,0 +1,134 @@
+From ccc14f937e27f34d9ccee467f5d49611af0c3174 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 10:12:00 -0600
+Subject: [PATCH] rfkill: hks: report the microphone and camera switches as
+ input switches
+
+User space learns about hardware privacy switches from input switches:
+Android sets its hardware microphone and camera privacy toggles from
+SW_MUTE_DEVICE and SW_CAMERA_LENS_COVER. Register an input device with a
+switch for each microphone and camera kill switch, set while the switch
+blocks the device, alongside the rfkill state.
+---
+ net/rfkill/Kconfig      |  1 +
+ net/rfkill/rfkill-hks.c | 59 +++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 60 insertions(+)
+
+diff --git a/net/rfkill/Kconfig b/net/rfkill/Kconfig
+index db17d9b8f..c68f2c2fc 100644
+--- a/net/rfkill/Kconfig
++++ b/net/rfkill/Kconfig
+@@ -37,4 +37,5 @@ config RFKILL_HKS
+ 	tristate "RFKILL driver for hardware kill swiches"
+ 	depends on RFKILL
+ 	depends on GPIOLIB
++	depends on INPUT
+ 	default n
+diff --git a/net/rfkill/rfkill-hks.c b/net/rfkill/rfkill-hks.c
+index cf178cf1c..39b8331ee 100644
+--- a/net/rfkill/rfkill-hks.c
++++ b/net/rfkill/rfkill-hks.c
+@@ -15,6 +15,7 @@
+ 
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
++#include <linux/input.h>
+ #include <linux/irq.h>
+ #include <linux/kobject.h>
+ #include <linux/sched.h>
+@@ -56,13 +57,36 @@ struct rfkill_hks_data {
+ 
+ 	bool enable_soft;
+ 	struct kobject kobj_storage;
++
++	/* Input switch reporting the state of a microphone or camera switch */
++	struct input_dev *input;
++	unsigned int sw_code;
+ };
+ 
+ struct rfkill_hks {
+ 	const struct rfkill_hks_pdata *pdata;
++	struct input_dev *input;
+ 	struct rfkill_hks_data data[];
+ };
+ 
++/*
++ * The microphone and camera switches are also input switches, which is how
++ * user space (Android's sensor privacy) learns about hardware privacy
++ * switches: SW_MUTE_DEVICE for the microphone and SW_CAMERA_LENS_COVER for
++ * the camera, set while the switch blocks the device.
++ */
++static unsigned int rfkill_hks_sw_code(enum rfkill_type type)
++{
++	switch (type) {
++	case RFKILL_TYPE_MIC:
++		return SW_MUTE_DEVICE;
++	case RFKILL_TYPE_CAMERA:
++		return SW_CAMERA_LENS_COVER;
++	default:
++		return 0;
++	}
++}
++
+ static void rfkill_hks_gpio_report_event(struct rfkill_hks_data *sdata)
+ {
+ 	int blocked;
+@@ -77,6 +101,11 @@ static void rfkill_hks_gpio_report_event(struct rfkill_hks_data *sdata)
+ 	dev_dbg(sdata->dev, "HKS %s blocked: %d\n", sdata->hks->name, blocked);
+ 	rfkill_set_hw_state(sdata->rfkill, blocked);
+ 
++	if (sdata->input) {
++		input_report_switch(sdata->input, sdata->sw_code, blocked);
++		input_sync(sdata->input);
++	}
++
+ 	if (sdata->gpiod_soft && !sdata->enable_soft)
+ 		gpiod_set_value_cansleep(sdata->gpiod_soft, !blocked);
+ }
+@@ -223,6 +252,9 @@ static int rfkill_hks_setup_rfkill(struct platform_device *pdev,
+ 
+ 	sdata->hks = hks;
+ 	sdata->dev = dev;
++	sdata->sw_code = rfkill_hks_sw_code(hks->type);
++	if (sdata->sw_code)
++		sdata->input = ddata->input;
+ 	sdata->gpiod = devm_fwnode_gpiod_get(dev, child, NULL,
+ 					     GPIOD_IN | GPIOD_FLAGS_BIT_NONEXCLUSIVE,
+ 					     desc);
+@@ -392,6 +424,33 @@ static int rfkill_hks_probe(struct platform_device *pdev)
+ 	ddata->pdata = pdata;
+ 	platform_set_drvdata(pdev, ddata);
+ 
++	for (i = 0; i < pdata->nswitches; i++) {
++		unsigned int code = rfkill_hks_sw_code(pdata->switches[i].type);
++
++		if (!code)
++			continue;
++
++		if (!ddata->input) {
++			ddata->input = devm_input_allocate_device(dev);
++			if (!ddata->input)
++				return -ENOMEM;
++
++			ddata->input->name = "Librem 5 hardware kill switches";
++			ddata->input->phys = "rfkill-hks/input0";
++			ddata->input->id.bustype = BUS_HOST;
++		}
++
++		input_set_capability(ddata->input, EV_SW, code);
++	}
++
++	if (ddata->input) {
++		ret = input_register_device(ddata->input);
++		if (ret) {
++			dev_err(dev, "failed to register input device: %d\n", ret);
++			return ret;
++		}
++	}
++
+ 	for (i = 0; i < pdata->nswitches; i++) {
+ 		const struct rfkill_hks_switch_pdata *hks = &pdata->switches[i];
+ 
+-- 
+2.55.0
+

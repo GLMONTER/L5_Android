@@ -3,3 +3,4 @@ type sysfs_iio, sysfs_type, fs_type;        # LSM9DS1 IMU/magnetometer, VCNL4040
 type sysfs_backlight, sysfs_type, fs_type;  # panel backlight (written by the composer)
 type sysfs_ddr_devfreq, sysfs_type, fs_type;  # DRAM controller devfreq (power HAL min_freq boost)
 type proc_printk, fs_type, proc_type;
+type sysfs_sdio_host, fs_type, sysfs_type;  # bind/unbind of the i.MX SDHC driver (Wi-Fi/BT reset)

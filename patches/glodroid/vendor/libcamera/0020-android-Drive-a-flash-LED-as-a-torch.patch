@@ -1,0 +1,633 @@
+From e9c6c6c5a081b16047f53bf22f17c6a85655f479 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 10:21:52 -0600
+Subject: [PATCH] android: Drive a flash LED as a torch
+
+A camera entry of the HAL configuration file can name the LED class
+device of the camera's flash LED ("flash-led"). For such a camera report
+the flash as available, implement the camera module's set_torch_mode()
+while the camera is closed, and follow FLASH_MODE_TORCH in the capture
+requests while it is open, reporting the flash state in the results.
+Opening the camera turns the torch off and makes it unavailable until the
+camera is closed, as the framework expects.
+
+The LED class brightness levels are the torch strength levels
+(FLASH_INFO_STRENGTH_MAXIMUM_LEVEL and DEFAULT_LEVEL, added to the
+metadata definitions). The camera3 module API predates them, so the
+module's library exports libcamera_hal_turn_on_torch_with_strength_level()
+and libcamera_hal_get_torch_strength_level() for a camera provider to
+implement turnOnTorchWithStrengthLevel() and getTorchStrengthLevel().
+Android's flashlight tile only turns on a torch that has strength levels.
+---
+ .../metadata/system/camera_metadata_tags.h    |   2 +
+ src/android/camera3_hal.cpp                   |  22 +++-
+ src/android/camera_capabilities.cpp           |  18 +++-
+ src/android/camera_capabilities.h             |   4 +-
+ src/android/camera_device.cpp                 | 100 +++++++++++++++++-
+ src/android/camera_device.h                   |  15 +++
+ src/android/camera_hal_config.cpp             |   3 +
+ src/android/camera_hal_config.h               |   2 +
+ src/android/camera_hal_manager.cpp            |  48 +++++++++
+ src/android/camera_hal_manager.h              |   4 +
+ src/android/flash_led.cpp                     |  86 +++++++++++++++
+ src/android/flash_led.h                       |  28 +++++
+ src/android/meson.build                       |   1 +
+ .../metadata/camera_metadata_tag_info.c       |  10 ++
+ 14 files changed, 334 insertions(+), 9 deletions(-)
+ create mode 100644 src/android/flash_led.cpp
+ create mode 100644 src/android/flash_led.h
+
+diff --git a/include/android/metadata/system/camera_metadata_tags.h b/include/android/metadata/system/camera_metadata_tags.h
+index e0f2f5a..6e16bd8 100644
+--- a/include/android/metadata/system/camera_metadata_tags.h
++++ b/include/android/metadata/system/camera_metadata_tags.h
+@@ -195,6 +195,8 @@ typedef enum camera_metadata_tag {
+     ANDROID_FLASH_INFO_AVAILABLE =                    // enum         | public       | HIDL v3.2
+             ANDROID_FLASH_INFO_START,
+     ANDROID_FLASH_INFO_CHARGE_DURATION,               // int64        | system       | HIDL v3.2
++    ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL,        // int32        | public       | HIDL v3.8
++    ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL,        // int32        | public       | HIDL v3.8
+     ANDROID_FLASH_INFO_END,
+ 
+     ANDROID_HOT_PIXEL_MODE =                          // enum         | public       | HIDL v3.2
+diff --git a/src/android/camera3_hal.cpp b/src/android/camera3_hal.cpp
+index a5ad237..fbc6f1f 100644
+--- a/src/android/camera3_hal.cpp
++++ b/src/android/camera3_hal.cpp
+@@ -45,10 +45,26 @@ static int hal_open_legacy([[maybe_unused]] const struct hw_module_t *module,
+ 	return -ENOSYS;
+ }
+ 
+-static int hal_set_torch_mode([[maybe_unused]] const char *camera_id,
+-			      [[maybe_unused]] bool enabled)
++static int hal_set_torch_mode(const char *camera_id, bool enabled)
+ {
+-	return -ENOSYS;
++	return CameraHalManager::instance()->setTorchMode(camera_id, enabled);
++}
++
++/*
++ * Torch strength levels. The camera3 module API predates them (the AIDL camera
++ * provider has turnOnTorchWithStrengthLevel() and getTorchStrengthLevel()), so
++ * a provider looks these up in the module's library.
++ */
++extern "C" __attribute__((visibility("default")))
++int libcamera_hal_turn_on_torch_with_strength_level(const char *camera_id, int32_t level)
++{
++	return CameraHalManager::instance()->setTorchStrength(camera_id, level);
++}
++
++extern "C" __attribute__((visibility("default")))
++int libcamera_hal_get_torch_strength_level(const char *camera_id, int32_t *level)
++{
++	return CameraHalManager::instance()->torchStrength(camera_id, level);
+ }
+ 
+ /*
+diff --git a/src/android/camera_capabilities.cpp b/src/android/camera_capabilities.cpp
+index 02ef42b..a32fe9a 100644
+--- a/src/android/camera_capabilities.cpp
++++ b/src/android/camera_capabilities.cpp
+@@ -402,11 +402,12 @@ void CameraCapabilities::computeHwLevel(
+ }
+ 
+ int CameraCapabilities::initialize(std::shared_ptr<Camera> camera,
+-				   int orientation, int facing)
++				   int orientation, int facing, unsigned int flashLevels)
+ {
+ 	camera_ = camera;
+ 	orientation_ = orientation;
+ 	facing_ = facing;
++	flashLevels_ = flashLevels;
+ 	rawStreamAvailable_ = false;
+ 	maxFrameDuration_ = 0;
+ 
+@@ -1285,10 +1286,23 @@ int CameraCapabilities::initializeStaticMetadata()
+ 		    ANDROID_SYNC_MAX_LATENCY_UNKNOWN);
+ 
+ 	/* Flash static metadata. */
+-	char flashAvailable = ANDROID_FLASH_INFO_AVAILABLE_FALSE;
++	/* A flash LED in torch mode (no flash for still captures) */
++	char flashAvailable = flashLevels_ ? ANDROID_FLASH_INFO_AVAILABLE_TRUE
++					   : ANDROID_FLASH_INFO_AVAILABLE_FALSE;
+ 	staticMetadata_->addEntry(ANDROID_FLASH_INFO_AVAILABLE,
+ 				  flashAvailable);
+ 
++	/* Torch strength levels: Android's flashlight tile needs more than one */
++	if (flashLevels_ > 1) {
++		int32_t maxLevel = flashLevels_;
++		staticMetadata_->addEntry(ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL,
++					  maxLevel);
++		staticMetadata_->addEntry(ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL,
++					  maxLevel);
++		availableCharacteristicsKeys_.insert(ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL);
++		availableCharacteristicsKeys_.insert(ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL);
++	}
++
+ 	/* Lens static metadata. */
+ 	std::vector<float> lensApertures = {
+ 		2.53 / 100,
+diff --git a/src/android/camera_capabilities.h b/src/android/camera_capabilities.h
+index 6bcc0d5..c8638ee 100644
+--- a/src/android/camera_capabilities.h
++++ b/src/android/camera_capabilities.h
+@@ -26,7 +26,7 @@ public:
+ 	CameraCapabilities() = default;
+ 
+ 	int initialize(std::shared_ptr<libcamera::Camera> camera,
+-		       int orientation, int facing);
++		       int orientation, int facing, unsigned int flashLevels = 0);
+ 
+ 	CameraMetadata *staticMetadata() const { return staticMetadata_.get(); }
+ 	libcamera::PixelFormat toPixelFormat(int format) const;
+@@ -72,6 +72,8 @@ private:
+ 	int orientation_;
+ 	bool rawStreamAvailable_;
+ 	bool autoFocus_ = false;
++	/* Torch strength levels of the flash LED, 0 without one */
++	unsigned int flashLevels_ = 0;
+ 	int64_t maxFrameDuration_;
+ 	camera_metadata_enum_android_info_supported_hardware_level hwLevel_;
+ 	std::set<camera_metadata_enum_android_request_available_capabilities> capabilities_;
+diff --git a/src/android/camera_device.cpp b/src/android/camera_device.cpp
+index 20a2335..47e7e2f 100644
+--- a/src/android/camera_device.cpp
++++ b/src/android/camera_device.cpp
+@@ -450,7 +450,75 @@ int CameraDevice::initialize(const CameraConfigData *cameraConfigData)
+ 		orientation_ = 0;
+ 	}
+ 
+-	return capabilities_.initialize(camera_, orientation_, facing_);
++	if (cameraConfigData && !cameraConfigData->flashLed.empty()) {
++		flash_ = std::make_unique<FlashLed>();
++		if (flash_->init(cameraConfigData->flashLed))
++			flash_.reset();
++	}
++
++	return capabilities_.initialize(camera_, orientation_, facing_,
++					flash_ ? flash_->maxLevel() : 0);
++}
++
++void CameraDevice::setTorchStatusCallback(std::function<void(int status)> callback)
++{
++	torchStatusCallback_ = std::move(callback);
++}
++
++void CameraDevice::notifyTorchStatus(int status) const
++{
++	if (torchStatusCallback_)
++		torchStatusCallback_(status);
++}
++
++/*
++ * Torch mode of the flash LED while the camera is closed: the camera3 module
++ * set_torch_mode() operation.
++ */
++int CameraDevice::setTorchMode(bool on)
++{
++	if (!flash_)
++		return -ENOSYS;
++
++	if (opened_)
++		return -EBUSY;
++
++	int ret = flash_->setTorch(on);
++	if (ret)
++		return ret;
++
++	notifyTorchStatus(on ? TORCH_MODE_STATUS_AVAILABLE_ON
++			     : TORCH_MODE_STATUS_AVAILABLE_OFF);
++	return 0;
++}
++
++/* Turn the torch on at a strength level (FLASH_INFO_STRENGTH_MAXIMUM_LEVEL) */
++int CameraDevice::setTorchStrength(int32_t level)
++{
++	if (!flash_)
++		return -ENOSYS;
++
++	if (opened_)
++		return -EBUSY;
++
++	if (level < 1)
++		return -EINVAL;
++
++	int ret = flash_->setTorchLevel(level);
++	if (ret)
++		return ret;
++
++	notifyTorchStatus(TORCH_MODE_STATUS_AVAILABLE_ON);
++	return 0;
++}
++
++int CameraDevice::torchStrength(int32_t *level) const
++{
++	if (!flash_)
++		return -ENOSYS;
++
++	*level = flash_->level();
++	return 0;
+ }
+ 
+ /*
+@@ -465,6 +533,13 @@ int CameraDevice::open(const hw_module_t *hardwareModule)
+ 		return ret;
+ 	}
+ 
++	/* The torch belongs to the camera while it is open */
++	opened_ = true;
++	if (flash_) {
++		flash_->setTorch(false);
++		notifyTorchStatus(TORCH_MODE_STATUS_NOT_AVAILABLE);
++	}
++
+ 	/* Initialize the hw_device_t in the instance camera3_module_t. */
+ 	camera3Device_.common.tag = HARDWARE_DEVICE_TAG;
+ 	camera3Device_.common.version = CAMERA_DEVICE_API_VERSION_3_3;
+@@ -486,6 +561,12 @@ void CameraDevice::close()
+ 	stop();
+ 
+ 	camera_->release();
++
++	opened_ = false;
++	if (flash_) {
++		flash_->setTorch(false);
++		notifyTorchStatus(TORCH_MODE_STATUS_AVAILABLE_OFF);
++	}
+ }
+ 
+ void CameraDevice::flush()
+@@ -938,6 +1019,13 @@ int CameraDevice::processControls(Camera3RequestDescriptor *descriptor)
+ 			     { minFrameDuration, maxFrameDuration });
+ 	}
+ 
++	/* Torch while streaming (e.g. a video light) */
++	if (flash_ && settings.getEntry(ANDROID_FLASH_MODE, &entry)) {
++		const bool torch = *entry.data.u8 == ANDROID_FLASH_MODE_TORCH;
++		if (torch != flash_->torch())
++			flash_->setTorch(torch);
++	}
++
+ 	/*
+ 	 * Autofocus. Android's AF trigger runs a scan in AUTO mode, and locks
+ 	 * the focus in the CONTINUOUS modes, which libcamera expresses as a
+@@ -1742,10 +1830,16 @@ CameraDevice::getResultMetadata(const Camera3RequestDescriptor &descriptor) cons
+ 	value = ANDROID_CONTROL_VIDEO_STABILIZATION_MODE_OFF;
+ 	resultMetadata->addEntry(ANDROID_CONTROL_VIDEO_STABILIZATION_MODE, value);
+ 
+-	value = ANDROID_FLASH_MODE_OFF;
++	found = settings.getEntry(ANDROID_FLASH_MODE, &entry);
++	value = found ? *entry.data.u8 : (uint8_t)ANDROID_FLASH_MODE_OFF;
+ 	resultMetadata->addEntry(ANDROID_FLASH_MODE, value);
+ 
+-	value = ANDROID_FLASH_STATE_UNAVAILABLE;
++	if (!flash_)
++		value = ANDROID_FLASH_STATE_UNAVAILABLE;
++	else if (flash_->torch())
++		value = ANDROID_FLASH_STATE_FIRED;
++	else
++		value = ANDROID_FLASH_STATE_READY;
+ 	resultMetadata->addEntry(ANDROID_FLASH_STATE, value);
+ 
+ 	if (settings.getEntry(ANDROID_LENS_APERTURE, &entry))
+diff --git a/src/android/camera_device.h b/src/android/camera_device.h
+index 194ca30..594fd96 100644
+--- a/src/android/camera_device.h
++++ b/src/android/camera_device.h
+@@ -7,6 +7,7 @@
+ 
+ #pragma once
+ 
++#include <functional>
+ #include <map>
+ #include <memory>
+ #include <queue>
+@@ -29,6 +30,7 @@
+ #include "camera_capabilities.h"
+ #include "camera_metadata.h"
+ #include "camera_stream.h"
++#include "flash_led.h"
+ #include "hal_framebuffer.h"
+ #include "jpeg/encoder.h"
+ 
+@@ -59,6 +61,12 @@ public:
+ 	int orientation() const { return orientation_; }
+ 	unsigned int maxJpegBufferSize() const;
+ 
++	bool hasFlash() const { return flash_ != nullptr; }
++	int setTorchMode(bool on);
++	int setTorchStrength(int32_t level);
++	int torchStrength(int32_t *level) const;
++	void setTorchStatusCallback(std::function<void(int status)> callback);
++
+ 	void setCallbacks(const camera3_callback_ops_t *callbacks);
+ 	const camera_metadata_t *getStaticMetadata();
+ 	const camera_metadata_t *constructDefaultRequestSettings(int type);
+@@ -102,9 +110,16 @@ private:
+ 	std::unique_ptr<CameraMetadata> getResultMetadata(
+ 		const Camera3RequestDescriptor &descriptor) const;
+ 
++	void notifyTorchStatus(int status) const;
++
+ 	unsigned int id_;
+ 	camera3_device_t camera3Device_;
+ 
++	/* Flash LED: torch mode while closed, FLASH_MODE_TORCH while open */
++	std::unique_ptr<FlashLed> flash_;
++	std::function<void(int status)> torchStatusCallback_;
++	bool opened_ = false;
++
+ 	libcamera::Mutex stateMutex_; /* Protects access to the camera state. */
+ 	State state_ LIBCAMERA_TSA_GUARDED_BY(stateMutex_);
+ 
+diff --git a/src/android/camera_hal_config.cpp b/src/android/camera_hal_config.cpp
+index 3631cb7..0447ade 100644
+--- a/src/android/camera_hal_config.cpp
++++ b/src/android/camera_hal_config.cpp
+@@ -106,6 +106,9 @@ int CameraHalConfig::Private::parseCameraConfigData(const std::string &cameraId,
+ 	if (parseRotation(cameraObject, cameraConfigData))
+ 		return -EINVAL;
+ 
++	/* Parse the optional property "flash-led", an LED class device name */
++	cameraConfigData.flashLed = cameraObject["flash-led"].get<std::string>("");
++
+ 	return 0;
+ }
+ 
+diff --git a/src/android/camera_hal_config.h b/src/android/camera_hal_config.h
+index a4bedb6..6bb4026 100644
+--- a/src/android/camera_hal_config.h
++++ b/src/android/camera_hal_config.h
+@@ -15,6 +15,8 @@
+ struct CameraConfigData {
+ 	int facing = -1;
+ 	int rotation = -1;
++	/* LED class device of the camera's flash LED, if it has one */
++	std::string flashLed;
+ };
+ 
+ class CameraHalConfig final : public libcamera::Extensible
+diff --git a/src/android/camera_hal_manager.cpp b/src/android/camera_hal_manager.cpp
+index 432537d..d34b484 100644
+--- a/src/android/camera_hal_manager.cpp
++++ b/src/android/camera_hal_manager.cpp
+@@ -8,6 +8,8 @@
+ #include "camera_hal_manager.h"
+ 
+ #include <algorithm>
++#include <stdlib.h>
++#include <string>
+ 
+ #include <libcamera/base/log.h>
+ 
+@@ -201,6 +203,15 @@ void CameraHalManager::cameraAdded(std::shared_ptr<Camera> cam)
+ 		return;
+ 	}
+ 
++	if (camera->hasFlash()) {
++		camera->setTorchStatusCallback([this, id](int status) {
++			if (callbacks_ && callbacks_->torch_mode_status_change)
++				callbacks_->torch_mode_status_change(callbacks_,
++								     std::to_string(id).c_str(),
++								     status);
++		});
++	}
++
+ 	if (isCameraNew) {
+ 		cameraIdsMap_.emplace(cam->id(), id);
+ 
+@@ -249,6 +260,43 @@ void CameraHalManager::cameraRemoved(std::shared_ptr<Camera> cam)
+ 	LOG(HAL, Debug) << "Camera ID: " << id << " removed successfully.";
+ }
+ 
++CameraDevice *CameraHalManager::cameraDeviceFromName(const char *cameraId)
++{
++	if (!cameraId)
++		return nullptr;
++
++	char *end;
++	unsigned long id = strtoul(cameraId, &end, 10);
++	if (end == cameraId || *end)
++		return nullptr;
++
++	return cameraDeviceFromHalId(id);
++}
++
++int CameraHalManager::setTorchMode(const char *cameraId, bool enabled)
++{
++	MutexLocker locker(mutex_);
++
++	CameraDevice *camera = cameraDeviceFromName(cameraId);
++	return camera ? camera->setTorchMode(enabled) : -EINVAL;
++}
++
++int CameraHalManager::setTorchStrength(const char *cameraId, int32_t level)
++{
++	MutexLocker locker(mutex_);
++
++	CameraDevice *camera = cameraDeviceFromName(cameraId);
++	return camera ? camera->setTorchStrength(level) : -EINVAL;
++}
++
++int CameraHalManager::torchStrength(const char *cameraId, int32_t *level)
++{
++	MutexLocker locker(mutex_);
++
++	CameraDevice *camera = cameraDeviceFromName(cameraId);
++	return camera ? camera->torchStrength(level) : -EINVAL;
++}
++
+ CameraDevice *CameraHalManager::cameraDeviceFromHalId(unsigned int id)
+ {
+ 	auto iter = std::find_if(cameras_.begin(), cameras_.end(),
+diff --git a/src/android/camera_hal_manager.h b/src/android/camera_hal_manager.h
+index e2d4eac..ebaf94a 100644
+--- a/src/android/camera_hal_manager.h
++++ b/src/android/camera_hal_manager.h
+@@ -40,6 +40,9 @@ public:
+ 	unsigned int numCameras() const;
+ 	int getCameraInfo(unsigned int id, struct camera_info *info);
+ 	void setCallbacks(const camera_module_callbacks_t *callbacks);
++	int setTorchMode(const char *cameraId, bool enabled);
++	int setTorchStrength(const char *cameraId, int32_t level);
++	int torchStrength(const char *cameraId, int32_t *level);
+ 
+ private:
+ 	LIBCAMERA_DISABLE_COPY_AND_MOVE(CameraHalManager)
+@@ -52,6 +55,7 @@ private:
+ 	void cameraRemoved(std::shared_ptr<libcamera::Camera> cam);
+ 
+ 	CameraDevice *cameraDeviceFromHalId(unsigned int id) LIBCAMERA_TSA_REQUIRES(mutex_);
++	CameraDevice *cameraDeviceFromName(const char *cameraId) LIBCAMERA_TSA_REQUIRES(mutex_);
+ 
+ 	std::unique_ptr<libcamera::CameraManager> cameraManager_;
+ 	CameraHalConfig halConfig_;
+diff --git a/src/android/flash_led.cpp b/src/android/flash_led.cpp
+new file mode 100644
+index 0000000..8a89364
+--- /dev/null
++++ b/src/android/flash_led.cpp
+@@ -0,0 +1,86 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++/*
++ * Flash LED of a camera, driven through the LED class (/sys/class/leds)
++ */
++
++#include "flash_led.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <libcamera/base/log.h>
++
++using namespace libcamera;
++
++LOG_DECLARE_CATEGORY(HAL)
++
++/*
++ * \class FlashLed
++ * \brief A camera flash LED in torch mode
++ *
++ * The LED is named by its LED class device (e.g. "white:torch"). In torch
++ * mode it is lit continuously at a strength level, an LED class brightness
++ * from 1 to max_brightness, which flash LED drivers keep within the torch
++ * current limit. The level defaults to the maximum.
++ */
++
++int FlashLed::init(const std::string &name)
++{
++	const std::string dir = "/sys/class/leds/" + name;
++	char buf[16] = {};
++
++	int fd = open((dir + "/max_brightness").c_str(), O_RDONLY | O_CLOEXEC);
++	if (fd < 0) {
++		int ret = -errno;
++		LOG(HAL, Error) << "Flash LED " << name << ": " << strerror(-ret);
++		return ret;
++	}
++	ssize_t len = read(fd, buf, sizeof(buf) - 1);
++	close(fd);
++
++	maxBrightness_ = len > 0 ? strtoul(buf, nullptr, 10) : 0;
++	if (!maxBrightness_) {
++		LOG(HAL, Error) << "Flash LED " << name << " has no brightness levels";
++		return -EINVAL;
++	}
++
++	brightnessPath_ = dir + "/brightness";
++	level_ = maxBrightness_;
++
++	return setTorch(false);
++}
++
++int FlashLed::setTorchLevel(unsigned int level)
++{
++	if (level < 1 || level > maxBrightness_)
++		return -EINVAL;
++
++	level_ = level;
++	return setTorch(true);
++}
++
++int FlashLed::setTorch(bool on)
++{
++	const std::string value = std::to_string(on ? level_ : 0);
++
++	int fd = open(brightnessPath_.c_str(), O_WRONLY | O_CLOEXEC);
++	if (fd < 0) {
++		int ret = -errno;
++		LOG(HAL, Error) << "Flash LED: " << strerror(-ret);
++		return ret;
++	}
++	ssize_t len = write(fd, value.c_str(), value.size());
++	int ret = len < 0 ? -errno : 0;
++	close(fd);
++
++	if (ret) {
++		LOG(HAL, Error) << "Flash LED: " << strerror(-ret);
++		return ret;
++	}
++
++	torch_ = on;
++	return 0;
++}
+diff --git a/src/android/flash_led.h b/src/android/flash_led.h
+new file mode 100644
+index 0000000..fbabe0e
+--- /dev/null
++++ b/src/android/flash_led.h
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++/*
++ * Flash LED of a camera, driven through the LED class (/sys/class/leds)
++ */
++
++#pragma once
++
++#include <string>
++
++class FlashLed
++{
++public:
++	int init(const std::string &name);
++
++	bool torch() const { return torch_; }
++	int setTorch(bool on);
++
++	/* Torch strength levels: the LED class brightness, 1 to maxLevel() */
++	unsigned int maxLevel() const { return maxBrightness_; }
++	unsigned int level() const { return level_; }
++	int setTorchLevel(unsigned int level);
++
++private:
++	std::string brightnessPath_;
++	unsigned int maxBrightness_ = 0;
++	unsigned int level_ = 0;
++	bool torch_ = false;
++};
+diff --git a/src/android/meson.build b/src/android/meson.build
+index 163d845..11598ff 100644
+--- a/src/android/meson.build
++++ b/src/android/meson.build
+@@ -31,6 +31,7 @@ android_hal_sources = files([
+     'camera_ops.cpp',
+     'camera_request.cpp',
+     'camera_stream.cpp',
++    'flash_led.cpp',
+     'hal_framebuffer.cpp',
+     'yuv/post_processor_yuv.cpp'
+ ])
+diff --git a/src/android/metadata/camera_metadata_tag_info.c b/src/android/metadata/camera_metadata_tag_info.c
+index e1b81f6..2e87dc4 100644
+--- a/src/android/metadata/camera_metadata_tag_info.c
++++ b/src/android/metadata/camera_metadata_tag_info.c
+@@ -269,6 +269,10 @@ static tag_info_t android_flash_info[ANDROID_FLASH_INFO_END -
+     { "available",                     TYPE_BYTE   },
+     [ ANDROID_FLASH_INFO_CHARGE_DURATION - ANDROID_FLASH_INFO_START ] =
+     { "chargeDuration",                TYPE_INT64  },
++    [ ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL - ANDROID_FLASH_INFO_START ] =
++    { "strengthMaximumLevel",          TYPE_INT32  },
++    [ ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL - ANDROID_FLASH_INFO_START ] =
++    { "strengthDefaultLevel",          TYPE_INT32  },
+ };
+ 
+ static tag_info_t android_hot_pixel[ANDROID_HOT_PIXEL_END -
+@@ -1564,6 +1568,12 @@ int camera_metadata_enum_snprint(uint32_t tag,
+         case ANDROID_FLASH_INFO_CHARGE_DURATION: {
+             break;
+         }
++        case ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL: {
++            break;
++        }
++        case ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL: {
++            break;
++        }
+ 
+         case ANDROID_HOT_PIXEL_MODE: {
+             switch (value) {
+-- 
+2.55.0
+

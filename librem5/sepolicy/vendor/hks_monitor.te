@@ -1,0 +1,8 @@
+# librem5-hks-monitor: follows the Wi-Fi/BT kill switch through /dev/rfkill (hks/)
+type hks_monitor, domain;
+type hks_monitor_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(hks_monitor)
+
+allow hks_monitor rfkill_device:chr_file r_file_perms;
+r_dir_file(hks_monitor, sysfs)
+set_prop(hks_monitor, vendor_hks_prop)

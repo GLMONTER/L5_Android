@@ -17,6 +17,7 @@
 
 #define LOG_TAG "LibcameraDevice"
 // #define LOG_NDEBUG 0
+#include <dlfcn.h>
 #include <log/log.h>
 #include <utils/Trace.h>
 
@@ -278,15 +279,32 @@ ndk::ScopedAStatus LibcameraDevice::setTorchMode(bool in_on) {
     return fromStatus(status);
 }
 
+// Librem 5: torch strength levels. The camera3 module API has none, libcamera's HAL module
+// exports them as functions of its library.
 ndk::ScopedAStatus LibcameraDevice::turnOnTorchWithStrengthLevel(int32_t in_torchStrength) {
-    // not supported by hardware module
-    return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+    using Fn = int (*)(const char*, int32_t);
+    auto fn = reinterpret_cast<Fn>(
+            dlsym(mModule->getDso(), "libcamera_hal_turn_on_torch_with_strength_level"));
+    if (!fn) return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+
+    Status status = initStatus();
+    if (status == Status::OK) {
+        status = getAidlStatus(fn(mCameraId.c_str(), in_torchStrength));
+    }
+    return fromStatus(status);
 }
 
 ndk::ScopedAStatus LibcameraDevice::getTorchStrengthLevel(int32_t* _aidl_return) {
-    // not supported by hardware module
-    _aidl_return = nullptr;
-    return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+    using Fn = int (*)(const char*, int32_t*);
+    auto fn = reinterpret_cast<Fn>(
+            dlsym(mModule->getDso(), "libcamera_hal_get_torch_strength_level"));
+    if (!fn) return fromStatus(Status::OPERATION_NOT_SUPPORTED);
+
+    Status status = initStatus();
+    if (status == Status::OK) {
+        status = getAidlStatus(fn(mCameraId.c_str(), _aidl_return));
+    }
+    return fromStatus(status);
 }
 
 std::shared_ptr<LibcameraDeviceSession> LibcameraDevice::createSession(

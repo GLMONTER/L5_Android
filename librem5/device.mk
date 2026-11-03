@@ -40,9 +40,9 @@ PRODUCT_COPY_FILES += \
     $(LIBREM5_FW)/brcm/brcmfmac43752-sdio.clm_blob:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac43752-sdio.clm_blob \
     $(LIBREM5_FW)/brcm/BCM4362A2.hcd:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/BCM4362A2.hcd
 
-# GLES 2.0 (etnaviv on GC7000L)
+# GLES 3.0: etnaviv is GLES 3.0 conformant on the GC7000L (i.MX8MQ) since Mesa 26.3
 PRODUCT_VENDOR_PROPERTIES += \
-    ro.opengles.version=131072
+    ro.opengles.version=196608
 
 # Slow GPU: lighter SystemUI
 PRODUCT_PACKAGES += \
@@ -119,6 +119,9 @@ PRODUCT_PACKAGES += android.hardware.power-service.librem5
 # Lights HAL: RGB status LED (charging / battery low / notifications)
 PRODUCT_PACKAGES += android.hardware.lights-service.librem5
 
+# Hardware kill switches: Bluetooth recovery after the Wi-Fi/BT switch (hks/)
+PRODUCT_PACKAGES += librem5-hks-monitor
+
 # Framework overlay: adaptive brightness option + lux -> backlight curve
 PRODUCT_PACKAGES += Librem5FrameworkResOverlay
 
@@ -170,5 +173,5 @@ PRODUCT_COPY_FILES += \
     device/purism/librem5/camera/hi846.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/shared/libcamera/ipa/softisp/hi846.yaml \
     device/purism/librem5/camera/s5k3l6xx.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/shared/libcamera/ipa/softisp/s5k3l6xx.yaml \
     frameworks/native/data/etc/android.hardware.camera.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.xml \
-    frameworks/native/data/etc/android.hardware.camera.autofocus.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.autofocus.xml \
+    frameworks/native/data/etc/android.hardware.camera.flash-autofocus.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.flash-autofocus.xml \
     frameworks/native/data/etc/android.hardware.camera.front.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.front.xml

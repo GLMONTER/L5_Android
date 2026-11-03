@@ -13,6 +13,14 @@
          switch uevent. -->
     <bool name="config_useDevInputEventForAudioJack">true</bool>
 
+    <!-- Microphone and camera kill switches: the kernel reports them as input switches
+         (SW_MUTE_DEVICE / SW_CAMERA_LENS_COVER on "Librem 5 hardware kill switches"), which set
+         the hardware privacy toggles. The software toggles (quick settings) stay available. -->
+    <bool name="config_supportsMicToggle">true</bool>
+    <bool name="config_supportsCamToggle">true</bool>
+    <bool name="config_supportsHardwareMicToggle">true</bool>
+    <bool name="config_supportsHardwareCamToggle">true</bool>
+
     <!-- N lux thresholds -->
     <integer-array name="config_autoBrightnessLevels">
         <item>1</item>
