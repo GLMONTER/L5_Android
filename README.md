@@ -18,7 +18,11 @@ patches and config, and the scripts to build and flash. Nothing else is modified
 | Battery/charging, buttons, vibration, USB adb | |
 | Suspend/resume | works in testing; one unreproduced non-wake seen |
 
-Not yet: modem (calls/SMS/data), earpiece, headphone routing untested, cameras, HDMI.
+| Modem (BM818): radio HAL, IMEI/baseband, SIM state, airplane mode; Phone + Messages | AT-command AIDL HAL in `librem5/radio` (fork of goldfish's ranchu HAL) |
+| Earpiece | WM8962 SPKOUTR (Purism UCM "Handset1") |
+
+Not yet: calls, SMS and mobile data (implemented but untested: no SIM yet), call audio (modem
+PCM <-> codec), headphone jack (detection enabled, untested), cameras, HDMI.
 
 Known gaps: `scripts/setup.sh` has not been run end to end on a fresh machine yet (everything
 after it has); the build depends on Purism, GloDroid, freedesktop and Debian keeping the
@@ -98,6 +102,10 @@ Hardware quirks found during bring-up (details in commit messages and file comme
   too slow for A2DP; patch 0005 honours the DT max-speed. hci_uart loads after wlan0 exists
   (brcmfmac resets the shared chip).
 - LSM9DS1 magnetometer axes: mount matrix -1,0,0;0,1,0;0,0,-1 (verified).
+- BM818: AT on /dev/ttyUSB2 (ttyUSB1/3 also answer), QMI data on wwan0. Without a SIM the
+  firmware rejects most network commands with a bare ERROR (even AT+CSQ). Its AT port appears
+  before the firmware answers, so the HAL retries init. Data calls use AT+CGACT +
+  AT$QCRMCALL (untested).
 - memfd: kernel patch 0004 (upstream backport) + the memfd_class policy capability; minigbm's
   shared metadata region is then an allocator memfd that every graphics client maps.
 - Android 17 needs `CONFIG_CPUSETS_V1`, `sys.use_memfd=true` (no ashmem upstream), and an audio

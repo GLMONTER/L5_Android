@@ -13,3 +13,5 @@ dontaudit kernel device:blk_file { create setattr unlink getattr };
 # init.rc debugfs tweaks (boot receiver tracing, mmc ext_csd) for features this device does not use
 dontaudit init debugfs_bootreceiver_tracing:dir { write add_name };
 dontaudit init debugfs_mmc:file setattr;
+# modprobe probes the kernel keyring (module signature checks) when loading the BT modules
+dontaudit vendor_modprobe self:key write;
