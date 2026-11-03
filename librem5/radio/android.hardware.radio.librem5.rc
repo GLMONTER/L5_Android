@@ -1,0 +1,5 @@
+service vendor.radio-librem5 /vendor/bin/hw/android.hardware.radio-service.librem5
+    class hal
+    user radio
+    group radio inet misc log readproc wakelock dialout
+    capabilities BLOCK_SUSPEND NET_ADMIN NET_RAW

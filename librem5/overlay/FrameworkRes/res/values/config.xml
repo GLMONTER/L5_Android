@@ -8,6 +8,11 @@
          notification light too. -->
     <bool name="config_intrusiveNotificationLed">true</bool>
 
+    <!-- Headphone jack: the kernel reports it as input switches ("Librem 5 Headphones" /
+         "Librem 5 Headset Mic", SW_HEADPHONE_INSERT / SW_MICROPHONE_INSERT), not as an h2w
+         switch uevent. -->
+    <bool name="config_useDevInputEventForAudioJack">true</bool>
+
     <!-- N lux thresholds -->
     <integer-array name="config_autoBrightnessLevels">
         <item>1</item>

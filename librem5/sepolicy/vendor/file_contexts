@@ -35,3 +35,6 @@
 # Mesa's GBM backend, dlopen()ed by libgbm_mesa inside every process that CPU-maps a buffer
 # (system_server's task snapshots crash on a NULL backend if it cannot load)
 /vendor/lib(64)?/gbm(/.*)?                                                    u:object_r:same_process_hal_file:s0
+# BM818 modem: radio HAL and its USB serial ports
+/vendor/bin/hw/android\.hardware\.radio-service\.librem5                      u:object_r:hal_radio_default_exec:s0
+/dev/ttyUSB[0-9]+                                                             u:object_r:radio_device:s0

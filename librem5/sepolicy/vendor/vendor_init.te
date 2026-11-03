@@ -2,3 +2,4 @@
 set_prop(vendor_init, vendor_hwc_prop)
 set_prop(vendor_init, vendor_sensors_prop)
 allow vendor_init proc_printk:file w_file_perms;
+set_prop(vendor_init, vendor_radio_prop)

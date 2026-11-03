@@ -1,0 +1,10 @@
+# Librem 5 radio HAL (radio/): AT commands on the BM818's USB serial port, data calls on wwan0
+allow hal_radio_default radio_device:chr_file rw_file_perms;
+get_prop(hal_radio_default, vendor_radio_prop)
+
+# Bring wwan0 up/down and give it the address from AT+CGCONTRDP (RadioData.cpp)
+allow hal_radio_default self:capability { net_admin net_raw };
+allow hal_radio_default self:udp_socket { create ioctl };
+allowxperm hal_radio_default self:udp_socket ioctl {
+    SIOCGIFFLAGS SIOCSIFFLAGS SIOCSIFADDR SIOCSIFNETMASK SIOCGIFINDEX
+};

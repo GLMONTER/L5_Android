@@ -138,3 +138,20 @@ PRODUCT_PRODUCT_PROPERTIES += \
     bluetooth.profile.pan.nap.enabled=true \
     bluetooth.profile.pan.panu.enabled=true \
     bluetooth.profile.pbap.server.enabled=true
+
+# Modem: Broadmobi BM818 (USB; option serial ports + qmi_wwan). AIDL radio HAL in radio/
+# (AT commands on ttyUSB2, data on wwan0). Telephony framework, Dialer and Messaging from AOSP's
+# telephony product makefiles, minus telephony_vendor.mk (legacy rild, replaced by the HAL).
+$(call inherit-product, $(SRC_TARGET_DIR)/product/telephony_system.mk)
+$(call inherit-product, $(SRC_TARGET_DIR)/product/telephony_system_ext.mk)
+$(call inherit-product, $(SRC_TARGET_DIR)/product/telephony_product.mk)
+PRODUCT_PACKAGES += \
+    android.hardware.radio-service.librem5 \
+    messaging
+PRODUCT_COPY_FILES += \
+    device/sample/etc/apns-full-conf.xml:$(TARGET_COPY_OUT_PRODUCT)/etc/apns-conf.xml \
+    frameworks/native/data/etc/android.hardware.telephony.gsm.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.telephony.gsm.xml
+PRODUCT_VENDOR_PROPERTIES += \
+    keyguard.no_require_sim=true \
+    ro.vendor.radio.at_port=/dev/ttyUSB2 \
+    ro.vendor.radio.data_interface=wwan0

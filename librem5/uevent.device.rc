@@ -16,3 +16,6 @@
 
 # rfkill: the default Bluetooth HAL (user bluetooth) toggles the BT radio through it
 /dev/rfkill               0660   root       bluetooth
+
+# BM818 modem: USB serial ports (option driver); the radio HAL (user radio) uses the AT port
+/dev/ttyUSB*              0660   radio      radio

@@ -1,0 +1,62 @@
+// AIDL radio HAL for the Librem 5's Broadmobi BM818 modem (AT commands on /dev/ttyUSB2,
+// data over the QMI interface wwan0). Forked from device/generic/goldfish/hals/radio
+// (android.hardware.radio-service.ranchu), which talks AT to the emulator's modem simulator;
+// changes are marked "Librem 5".
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_binary {
+    name: "android.hardware.radio-service.librem5",
+    vendor: true,
+    relative_install_path: "hw",
+    init_rc: ["android.hardware.radio.librem5.rc"],
+    vintf_fragments: ["android.hardware.radio.librem5.xml"],
+    cpp_std: "c++20",
+    srcs: [
+        "AtChannel.cpp",
+        "AtResponse.cpp",
+        "hexbin.cpp",
+        "IdAllocator.cpp",
+        "ImsMedia.cpp",
+        "main.cpp",
+        "makeRadioResponseInfo.cpp",
+        "Parser.cpp",
+        "ratUtils.cpp",
+        "RadioConfig.cpp",
+        "RadioData.cpp",
+        "RadioIms.cpp",
+        "RadioMessaging.cpp",
+        "RadioModem.cpp",
+        "RadioNetwork.cpp",
+        "RadioSim.cpp",
+        "RadioVoice.cpp",
+        "Sap.cpp",
+    ],
+    shared_libs: [
+        "android.hardware.radio.config-V5-ndk",
+        "android.hardware.radio.data-V5-ndk",
+        "android.hardware.radio.ims-V4-ndk",
+        "android.hardware.radio.ims.media-V4-ndk",
+        "android.hardware.radio.messaging-V5-ndk",
+        "android.hardware.radio.modem-V5-ndk",
+        "android.hardware.radio.network-V5-ndk",
+        "android.hardware.radio.sap-V1-ndk",
+        "android.hardware.radio.sim-V5-ndk",
+        "android.hardware.radio.voice-V5-ndk",
+        "libbase",
+        "libbinder_ndk",
+        "libcrypto",
+        "libcutils",
+        "liblog",
+        "libutils",
+    ],
+    cflags: [
+        "-DANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION",
+        "-DLOG_TAG=\"radio-service.librem5\"",
+        "-Wno-deprecated-declarations",
+    ],
+    // AtResponse::unexpected() throws instead of aborting the HAL (see AtChannel::requestLoop)
+    cppflags: ["-fexceptions"],
+}
