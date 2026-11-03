@@ -1,0 +1,87 @@
+From 9eb7ac9fbf2779ac69b0018ecad4b567ea8f91f2 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Mon, 2 Nov 2026 23:24:50 -0600
+Subject: [PATCH] libcamera: Add Hynix HI846 and Samsung S5K3L6XX sensor
+ support
+
+Add camera sensor helpers for the Hynix HI846 and the Samsung S5K3L6XX
+(the front and rear cameras of the Purism Librem 5), and static
+properties for the S5K3L6XX.
+
+Without a helper, AGC uses the analogue gain control codes as gain
+values: the S5K3L6XX's 1x code (32) reads as a 32x gain and the HI846's
+1x code (0) as no gain at all, so the exposure/gain split and the
+brightness regulation are wrong.
+
+HI846: analogue gain = 1 + code / 16 (codes 0..240, 1x..16x).
+S5K3L6XX: analogue gain = code / 32 (codes 32..512, 1x..16x).
+Both have a black level of 64 at 10 bits. The S5K3L6XX has 1.12 um
+pixels.
+---
+ src/ipa/libipa/camera_sensor_helper.cpp       | 26 +++++++++++++++++++
+ .../sensor/camera_sensor_properties.cpp       |  5 ++++
+ 2 files changed, 31 insertions(+)
+
+diff --git a/src/ipa/libipa/camera_sensor_helper.cpp b/src/ipa/libipa/camera_sensor_helper.cpp
+index 359040e..e77d0dd 100644
+--- a/src/ipa/libipa/camera_sensor_helper.cpp
++++ b/src/ipa/libipa/camera_sensor_helper.cpp
+@@ -529,6 +529,19 @@ public:
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("hm1246", CameraSensorHelperHm1246)
+ 
++class CameraSensorHelperHi846 : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperHi846()
++	{
++		/* 64 at 10 bits. */
++		blackLevel_ = 4096;
++		/* Analogue gain register (0x0077): gain = 1 + code / 16 (0..240: 1x..16x). */
++		gain_ = AnalogueGainLinear{ 1, 16, 0, 16 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("hi846", CameraSensorHelperHi846)
++
+ class CameraSensorHelperImx214 : public CameraSensorHelper
+ {
+ public:
+@@ -887,6 +900,19 @@ public:
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("ov13858", CameraSensorHelperOv13858)
+ 
++class CameraSensorHelperS5k3l6xx : public CameraSensorHelper
++{
++public:
++	CameraSensorHelperS5k3l6xx()
++	{
++		/* 64 at 10 bits. */
++		blackLevel_ = 4096;
++		/* Analogue gain register (0x0204): gain = code / 32 (32..512: 1x..16x). */
++		gain_ = AnalogueGainLinear{ 1, 0, 0, 32 };
++	}
++};
++REGISTER_CAMERA_SENSOR_HELPER("s5k3l6xx", CameraSensorHelperS5k3l6xx)
++
+ class CameraSensorHelperVd55g1 : public CameraSensorHelper
+ {
+ public:
+diff --git a/src/libcamera/sensor/camera_sensor_properties.cpp b/src/libcamera/sensor/camera_sensor_properties.cpp
+index 20cfd0b..3cfc28c 100644
+--- a/src/libcamera/sensor/camera_sensor_properties.cpp
++++ b/src/libcamera/sensor/camera_sensor_properties.cpp
+@@ -571,6 +571,11 @@ const CameraSensorProperties *CameraSensorProperties::get(const std::string &sen
+ 			},
+ 			.sensorDelays = { },
+ 		} },
++		{ "s5k3l6xx", {
++			.unitCellSize = { 1120, 1120 },
++			.testPatternModes = {},
++			.sensorDelays = { },
++		} },
+ 		{ "vd55g1", {
+ 			.unitCellSize = { 2160, 2160 },
+ 			.testPatternModes = {
+-- 
+2.55.0
+
