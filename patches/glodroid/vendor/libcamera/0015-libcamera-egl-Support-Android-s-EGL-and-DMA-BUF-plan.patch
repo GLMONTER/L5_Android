@@ -1,0 +1,63 @@
+From d440d7f76c5c442f481f5faf833b33323d7f6577 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 09:46:08 -0600
+Subject: [PATCH 15/19] libcamera: egl: Support Android's EGL and DMA-BUF plane
+ offsets
+
+The Android EGL loader only implements the Android platform, so
+eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA) fails there. Fall back
+to the default display, which needs no window system for the off-screen
+rendering the software ISP does.
+
+Use the reserved eGLImage::offset_ (initialised to 0) as the offset of the
+image in its DMA-BUF, so that the planes of a multi-planar buffer that
+share one DMA-BUF can be imported.
+---
+ include/libcamera/internal/egl.h |  2 +-
+ src/libcamera/egl.cpp            | 10 +++++++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/include/libcamera/internal/egl.h b/include/libcamera/internal/egl.h
+index d6fb6fe..30da6a8 100644
+--- a/include/libcamera/internal/egl.h
++++ b/include/libcamera/internal/egl.h
+@@ -87,7 +87,7 @@ public:
+ 	uint32_t width_; /**< Image width in pixels */
+ 	uint32_t height_; /**< Image height in pixels */
+ 	uint32_t stride_; /**< Row stride in bytes */
+-	uint32_t offset_; /**< Buffer offset (reserved for future use) */
++	uint32_t offset_ = 0; /**< Offset of the image in its DMA-BUF, in bytes */
+ 	uint32_t framesize_; /**< Total frame size in bytes (stride * height) */
+ 	uint32_t texture_unit_uniform_id_; /**< Shader uniform id for texture unit */
+ 	GLenum texture_unit_; /**< Texture unit associated with this image eg (GL_TEXTURE0) */
+diff --git a/src/libcamera/egl.cpp b/src/libcamera/egl.cpp
+index ff9e54a..7eac1ed 100644
+--- a/src/libcamera/egl.cpp
++++ b/src/libcamera/egl.cpp
+@@ -200,7 +200,7 @@ int eGL::createDMABufTexture2D(eGLImage &eglImage, int fd, bool output)
+ 		EGL_HEIGHT, (EGLint)eglImage.height_,
+ 		EGL_LINUX_DRM_FOURCC_EXT, drm_format,
+ 		EGL_DMA_BUF_PLANE0_FD_EXT, fd,
+-		EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
++		EGL_DMA_BUF_PLANE0_OFFSET_EXT, (EGLint)eglImage.offset_,
+ 		EGL_DMA_BUF_PLANE0_PITCH_EXT, (EGLint)eglImage.stride_,
+ 		EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, 0,
+ 		EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, 0,
+@@ -319,6 +319,14 @@ EGLDisplay eGL::probeDisplay()
+ 					EGL_DEFAULT_DISPLAY,
+ 					nullptr);
+ 
++	/*
++	 * The Android EGL loader only implements the Android platform. Its
++	 * default display needs no window system for the off-screen rendering
++	 * done here.
++	 */
++	if (display == EGL_NO_DISPLAY)
++		display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
++
+ 	if (display == EGL_NO_DISPLAY) {
+ 		LOG(eGL, Info) << "Unable to get EGL display";
+ 		return EGL_NO_DISPLAY;
+-- 
+2.55.0
+

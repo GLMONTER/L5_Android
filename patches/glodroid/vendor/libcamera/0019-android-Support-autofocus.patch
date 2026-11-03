@@ -1,0 +1,257 @@
+From 1a3a323401a78c02fd49b9705acf78e7d18ca062 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 09:46:08 -0600
+Subject: [PATCH 19/19] android: Support autofocus
+
+When the camera supports AfMode with auto and continuous modes and
+LensPosition, report the AUTO, CONTINUOUS_VIDEO and CONTINUOUS_PICTURE AF
+modes, the minimum focus distance from the LensPosition range and an
+uncalibrated focus distance, and default the templates to continuous AF.
+
+Translate the Android AF mode and trigger: a trigger starts a scan in AUTO
+mode, and locks the focus in the CONTINUOUS modes by pausing continuous AF
+at the end of the current scan. Report the AF state from the libcamera AF
+and pause states, the lens state and the focus distance.
+---
+ src/android/camera_capabilities.cpp |  43 ++++++++++-
+ src/android/camera_capabilities.h   |   1 +
+ src/android/camera_device.cpp       | 111 ++++++++++++++++++++++++++--
+ 3 files changed, 148 insertions(+), 7 deletions(-)
+
+diff --git a/src/android/camera_capabilities.cpp b/src/android/camera_capabilities.cpp
+index 8a700a7..02ef42b 100644
+--- a/src/android/camera_capabilities.cpp
++++ b/src/android/camera_capabilities.cpp
+@@ -978,6 +978,36 @@ int CameraCapabilities::initializeStaticMetadata()
+ 	std::vector<uint8_t> availableAfModes = {
+ 		ANDROID_CONTROL_AF_MODE_OFF,
+ 	};
++
++	/*
++	 * Contrast AF with a movable lens: libcamera's auto (triggered) and
++	 * continuous modes back the Android AUTO and CONTINUOUS_* modes.
++	 */
++	const auto afModeInfo = controlsInfo.find(&controls::AfMode);
++	if (afModeInfo != controlsInfo.end() &&
++	    controlsInfo.find(&controls::LensPosition) != controlsInfo.end()) {
++		bool afAuto = false, afContinuous = false;
++		for (const auto &value : afModeInfo->second.values()) {
++			afAuto |= value.get<int32_t>() == controls::AfModeAuto;
++			afContinuous |= value.get<int32_t>() == controls::AfModeContinuous;
++		}
++		autoFocus_ = afAuto && afContinuous;
++	}
++
++	if (autoFocus_) {
++		availableAfModes.push_back(ANDROID_CONTROL_AF_MODE_AUTO);
++		availableAfModes.push_back(ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO);
++		availableAfModes.push_back(ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE);
++
++		availableRequestKeys_.insert(ANDROID_LENS_FOCUS_DISTANCE);
++		availableResultKeys_.insert(ANDROID_LENS_FOCUS_DISTANCE);
++		availableCharacteristicsKeys_.insert(ANDROID_LENS_INFO_FOCUS_DISTANCE_CALIBRATION);
++
++		uint8_t calibration = ANDROID_LENS_INFO_FOCUS_DISTANCE_CALIBRATION_UNCALIBRATED;
++		staticMetadata_->addEntry(ANDROID_LENS_INFO_FOCUS_DISTANCE_CALIBRATION,
++					  calibration);
++	}
++
+ 	staticMetadata_->addEntry(ANDROID_CONTROL_AF_AVAILABLE_MODES,
+ 				  availableAfModes);
+ 
+@@ -1297,7 +1327,12 @@ int CameraCapabilities::initializeStaticMetadata()
+ 	staticMetadata_->addEntry(ANDROID_LENS_INFO_HYPERFOCAL_DISTANCE,
+ 				  hypeFocalDistance);
+ 
++	/* In dioptres, 0 for a fixed focus lens */
+ 	float minFocusDistance = 0;
++	if (autoFocus_) {
++		const auto &lensInfo = controlsInfo.find(&controls::LensPosition);
++		minFocusDistance = lensInfo->second.max().get<float>();
++	}
+ 	staticMetadata_->addEntry(ANDROID_LENS_INFO_MINIMUM_FOCUS_DISTANCE,
+ 				  minFocusDistance);
+ 
+@@ -1589,7 +1624,8 @@ std::unique_ptr<CameraMetadata> CameraCapabilities::requestTemplatePreview() con
+ 	requestTemplate->addEntry(ANDROID_CONTROL_AE_ANTIBANDING_MODE,
+ 				  aeAntibandingMode);
+ 
+-	uint8_t afMode = ANDROID_CONTROL_AF_MODE_OFF;
++	uint8_t afMode = autoFocus_ ? ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE
++				    : ANDROID_CONTROL_AF_MODE_OFF;
+ 	requestTemplate->addEntry(ANDROID_CONTROL_AF_MODE, afMode);
+ 
+ 	uint8_t afTrigger = ANDROID_CONTROL_AF_TRIGGER_IDLE;
+@@ -1663,5 +1699,10 @@ std::unique_ptr<CameraMetadata> CameraCapabilities::requestTemplateVideo() const
+ 	previewTemplate->updateEntry(ANDROID_CONTROL_AE_TARGET_FPS_RANGE,
+ 				     entry.data.i32 + 2, 2);
+ 
++	if (autoFocus_) {
++		uint8_t afMode = ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO;
++		previewTemplate->updateEntry(ANDROID_CONTROL_AF_MODE, afMode);
++	}
++
+ 	return previewTemplate;
+ }
+diff --git a/src/android/camera_capabilities.h b/src/android/camera_capabilities.h
+index 56ac1ef..6bcc0d5 100644
+--- a/src/android/camera_capabilities.h
++++ b/src/android/camera_capabilities.h
+@@ -71,6 +71,7 @@ private:
+ 	int facing_;
+ 	int orientation_;
+ 	bool rawStreamAvailable_;
++	bool autoFocus_ = false;
+ 	int64_t maxFrameDuration_;
+ 	camera_metadata_enum_android_info_supported_hardware_level hwLevel_;
+ 	std::set<camera_metadata_enum_android_request_available_capabilities> capabilities_;
+diff --git a/src/android/camera_device.cpp b/src/android/camera_device.cpp
+index ed89fd4..20a2335 100644
+--- a/src/android/camera_device.cpp
++++ b/src/android/camera_device.cpp
+@@ -938,6 +938,50 @@ int CameraDevice::processControls(Camera3RequestDescriptor *descriptor)
+ 			     { minFrameDuration, maxFrameDuration });
+ 	}
+ 
++	/*
++	 * Autofocus. Android's AF trigger runs a scan in AUTO mode, and locks
++	 * the focus in the CONTINUOUS modes, which libcamera expresses as a
++	 * pause of continuous AF at the end of the current scan.
++	 */
++	if (isSupported(controls::AfMode) &&
++	    settings.getEntry(ANDROID_CONTROL_AF_MODE, &entry)) {
++		int32_t afMode;
++		switch (*entry.data.u8) {
++		case ANDROID_CONTROL_AF_MODE_AUTO:
++		case ANDROID_CONTROL_AF_MODE_MACRO:
++			afMode = controls::AfModeAuto;
++			break;
++		case ANDROID_CONTROL_AF_MODE_CONTINUOUS_VIDEO:
++		case ANDROID_CONTROL_AF_MODE_CONTINUOUS_PICTURE:
++			afMode = controls::AfModeContinuous;
++			break;
++		default:
++			afMode = controls::AfModeManual;
++			break;
++		}
++		controls.set(controls::AfMode, afMode);
++
++		uint8_t afTrigger = ANDROID_CONTROL_AF_TRIGGER_IDLE;
++		if (settings.getEntry(ANDROID_CONTROL_AF_TRIGGER, &entry))
++			afTrigger = *entry.data.u8;
++
++		if (afMode == controls::AfModeAuto) {
++			if (afTrigger == ANDROID_CONTROL_AF_TRIGGER_START)
++				controls.set(controls::AfTrigger, controls::AfTriggerStart);
++			else if (afTrigger == ANDROID_CONTROL_AF_TRIGGER_CANCEL)
++				controls.set(controls::AfTrigger, controls::AfTriggerCancel);
++		} else if (afMode == controls::AfModeContinuous) {
++			if (afTrigger == ANDROID_CONTROL_AF_TRIGGER_START)
++				controls.set(controls::AfPause, controls::AfPauseDeferred);
++			else if (afTrigger == ANDROID_CONTROL_AF_TRIGGER_CANCEL)
++				controls.set(controls::AfPause, controls::AfPauseResume);
++		} else if (isSupported(controls::LensPosition) &&
++			   settings.getEntry(ANDROID_LENS_FOCUS_DISTANCE, &entry)) {
++			/* Both in dioptres */
++			controls.set(controls::LensPosition, *entry.data.f);
++		}
++	}
++
+ 	if (isSupported(controls::draft::FaceDetectMode) &&
+ 	    settings.getEntry(ANDROID_STATISTICS_FACE_DETECT_MODE, &entry)) {
+ 		const uint8_t *data = entry.data.u8;
+@@ -1546,6 +1590,51 @@ void CameraDevice::notifyError(uint32_t frameNumber, camera3_stream_t *stream,
+ /*
+  * Produce a set of fixed result metadata.
+  */
++/*
++ * Android AF state from the libcamera AF state of a frame. In the continuous
++ * modes a paused AF is a locked focus (after an AF trigger).
++ */
++static uint8_t androidAfState(uint8_t afMode, const ControlList &metadata)
++{
++	const auto state = metadata.get(controls::AfState);
++
++	if (!state || afMode == ANDROID_CONTROL_AF_MODE_OFF ||
++	    afMode == ANDROID_CONTROL_AF_MODE_EDOF)
++		return ANDROID_CONTROL_AF_STATE_INACTIVE;
++
++	if (afMode == ANDROID_CONTROL_AF_MODE_AUTO ||
++	    afMode == ANDROID_CONTROL_AF_MODE_MACRO) {
++		switch (*state) {
++		case controls::AfStateScanning:
++			return ANDROID_CONTROL_AF_STATE_ACTIVE_SCAN;
++		case controls::AfStateFocused:
++			return ANDROID_CONTROL_AF_STATE_FOCUSED_LOCKED;
++		case controls::AfStateFailed:
++			return ANDROID_CONTROL_AF_STATE_NOT_FOCUSED_LOCKED;
++		default:
++			return ANDROID_CONTROL_AF_STATE_INACTIVE;
++		}
++	}
++
++	const int32_t pauseState = metadata.get(controls::AfPauseState)
++					   .value_or(controls::AfPauseStateRunning);
++	if (pauseState == controls::AfPauseStatePaused)
++		return *state == controls::AfStateFocused
++			       ? ANDROID_CONTROL_AF_STATE_FOCUSED_LOCKED
++			       : ANDROID_CONTROL_AF_STATE_NOT_FOCUSED_LOCKED;
++
++	switch (*state) {
++	case controls::AfStateScanning:
++		return ANDROID_CONTROL_AF_STATE_PASSIVE_SCAN;
++	case controls::AfStateFocused:
++		return ANDROID_CONTROL_AF_STATE_PASSIVE_FOCUSED;
++	case controls::AfStateFailed:
++		return ANDROID_CONTROL_AF_STATE_PASSIVE_UNFOCUSED;
++	default:
++		return ANDROID_CONTROL_AF_STATE_INACTIVE;
++	}
++}
++
+ std::unique_ptr<CameraMetadata>
+ CameraDevice::getResultMetadata(const Camera3RequestDescriptor &descriptor) const
+ {
+@@ -1617,13 +1706,16 @@ CameraDevice::getResultMetadata(const Camera3RequestDescriptor &descriptor) cons
+ 	value = ANDROID_CONTROL_AE_STATE_CONVERGED;
+ 	resultMetadata->addEntry(ANDROID_CONTROL_AE_STATE, value);
+ 
+-	value = ANDROID_CONTROL_AF_MODE_OFF;
+-	resultMetadata->addEntry(ANDROID_CONTROL_AF_MODE, value);
++	found = settings.getEntry(ANDROID_CONTROL_AF_MODE, &entry);
++	const uint8_t afMode = found ? *entry.data.u8 :
++				       (uint8_t)ANDROID_CONTROL_AF_MODE_OFF;
++	resultMetadata->addEntry(ANDROID_CONTROL_AF_MODE, afMode);
+ 
+-	value = ANDROID_CONTROL_AF_STATE_INACTIVE;
+-	resultMetadata->addEntry(ANDROID_CONTROL_AF_STATE, value);
++	const uint8_t afState = androidAfState(afMode, metadata);
++	resultMetadata->addEntry(ANDROID_CONTROL_AF_STATE, afState);
+ 
+-	value = ANDROID_CONTROL_AF_TRIGGER_IDLE;
++	found = settings.getEntry(ANDROID_CONTROL_AF_TRIGGER, &entry);
++	value = found ? *entry.data.u8 : (uint8_t)ANDROID_CONTROL_AF_TRIGGER_IDLE;
+ 	resultMetadata->addEntry(ANDROID_CONTROL_AF_TRIGGER, value);
+ 
+ 	value = ANDROID_CONTROL_AWB_MODE_AUTO;
+@@ -1662,9 +1754,16 @@ CameraDevice::getResultMetadata(const Camera3RequestDescriptor &descriptor) cons
+ 	float focal_length = 1.0;
+ 	resultMetadata->addEntry(ANDROID_LENS_FOCAL_LENGTH, focal_length);
+ 
+-	value = ANDROID_LENS_STATE_STATIONARY;
++	value = afState == ANDROID_CONTROL_AF_STATE_ACTIVE_SCAN ||
++			afState == ANDROID_CONTROL_AF_STATE_PASSIVE_SCAN
++		? ANDROID_LENS_STATE_MOVING
++		: ANDROID_LENS_STATE_STATIONARY;
+ 	resultMetadata->addEntry(ANDROID_LENS_STATE, value);
+ 
++	const auto lensPosition = metadata.get(controls::LensPosition);
++	if (lensPosition)
++		resultMetadata->addEntry(ANDROID_LENS_FOCUS_DISTANCE, *lensPosition);
++
+ 	value = ANDROID_LENS_OPTICAL_STABILIZATION_MODE_OFF;
+ 	resultMetadata->addEntry(ANDROID_LENS_OPTICAL_STABILIZATION_MODE,
+ 				 value);
+-- 
+2.55.0
+

@@ -1,0 +1,441 @@
+From 5bc17725b0542d8ac37fa989bc1c86afe651a103 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 09:46:08 -0600
+Subject: [PATCH 16/19] libcamera: software_isp: debayer_egl: Add NV12 output
+
+The Android camera HAL streams NV12. For NV12 output the Bayer shader
+renders RGB to an intermediate texture, from which two programs write the
+Y and the interleaved UV plane of the output buffer, each rendered as an
+ARGB8888 image of a quarter of the plane's width: four bytes per fragment.
+UV is the average of each 2x2 block, by one bilinear fetch. Full range
+BT.601, as the CPU debayer's NV12 output. NV12 uses the CPU debayer's tight
+stride, which buffers from the platform allocator have.
+
+Also centre the scaled image on the output so that what doesn't fit is
+cropped evenly on both sides instead of on the right and bottom, and
+compute the statistics on the centre window of the input, where the CPU
+debayer computes them, instead of its top left corner.
+---
+ src/libcamera/shaders/meson.build          |   1 +
+ src/libcamera/shaders/rgb_to_nv12.frag     |  49 +++++
+ src/libcamera/software_isp/debayer_egl.cpp | 197 +++++++++++++++++++--
+ src/libcamera/software_isp/debayer_egl.h   |  23 +++
+ 4 files changed, 258 insertions(+), 12 deletions(-)
+ create mode 100644 src/libcamera/shaders/rgb_to_nv12.frag
+
+diff --git a/src/libcamera/shaders/meson.build b/src/libcamera/shaders/meson.build
+index c409ff9..76756c2 100644
+--- a/src/libcamera/shaders/meson.build
++++ b/src/libcamera/shaders/meson.build
+@@ -7,6 +7,7 @@ shader_files = files([
+     'bayer_unpacked.frag',
+     'bayer_unpacked.vert',
+     'identity.vert',
++    'rgb_to_nv12.frag',
+ ])
+ 
+ # Generate header from shaders
+diff --git a/src/libcamera/shaders/rgb_to_nv12.frag b/src/libcamera/shaders/rgb_to_nv12.frag
+new file mode 100644
+index 0000000..8a44828
+--- /dev/null
++++ b/src/libcamera/shaders/rgb_to_nv12.frag
+@@ -0,0 +1,49 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++/*
++ * rgb_to_nv12.frag - Convert an RGB texture to one plane of NV12
++ *
++ * Each fragment writes four bytes of the plane, rendered to the plane as an
++ * ARGB8888 image of a quarter of its width (bytes B, G, R, A in memory):
++ * - Y (default): the luma of four adjacent pixels
++ * - UV (NV12_UV defined): Cb and Cr of two adjacent 2x2 pixel blocks, each
++ *   block averaged by a single bilinear fetch at its centre
++ *
++ * Full range BT.601, as for JPEG.
++ */
++
++#ifdef GL_ES
++precision highp float;
++#endif
++
++uniform sampler2D rgb_tex;
++/* Size of rgb_tex in pixels */
++uniform vec2 rgb_size;
++
++const vec3 kY = vec3(0.299, 0.587, 0.114);
++const vec3 kCb = vec3(-0.168736, -0.331264, 0.5);
++const vec3 kCr = vec3(0.5, -0.418688, -0.081312);
++
++vec3 rgbAt(float x, float y)
++{
++	return texture2D(rgb_tex, vec2(x, y) / rgb_size).rgb;
++}
++
++void main(void)
++{
++	float x = floor(gl_FragCoord.x) * 4.0;
++
++#if defined(NV12_UV)
++	float y = floor(gl_FragCoord.y) * 2.0 + 1.0;
++	vec3 c0 = rgbAt(x + 1.0, y);
++	vec3 c1 = rgbAt(x + 3.0, y);
++	const float offset = 128.0 / 255.0;
++
++	gl_FragColor = vec4(dot(c1, kCb) + offset, dot(c0, kCr) + offset,
++			    dot(c0, kCb) + offset, dot(c1, kCr) + offset);
++#else
++	float y = gl_FragCoord.y;
++
++	gl_FragColor = vec4(dot(rgbAt(x + 2.5, y), kY), dot(rgbAt(x + 1.5, y), kY),
++			    dot(rgbAt(x + 0.5, y), kY), dot(rgbAt(x + 3.5, y), kY));
++#endif
++}
+diff --git a/src/libcamera/software_isp/debayer_egl.cpp b/src/libcamera/software_isp/debayer_egl.cpp
+index 33933b1..fdf67d6 100644
+--- a/src/libcamera/software_isp/debayer_egl.cpp
++++ b/src/libcamera/software_isp/debayer_egl.cpp
+@@ -11,11 +11,13 @@
+ 
+ #include <algorithm>
+ #include <assert.h>
++#include <initializer_list>
+ #include <memory>
+ #include <span>
+ #include <stdlib.h>
+ #include <string>
+ #include <tuple>
++#include <utility>
+ #include <vector>
+ 
+ #include <libcamera/base/utils.h>
+@@ -59,7 +61,8 @@ int DebayerEGL::getInputConfig(PixelFormat inputFormat, DebayerInputConfig &conf
+ 	std::vector<PixelFormat> outputFormats = { formats::XRGB8888,
+ 						   formats::ARGB8888,
+ 						   formats::XBGR8888,
+-						   formats::ABGR8888 };
++						   formats::ABGR8888,
++						   formats::NV12 };
+ 
+ 	if ((bayerFormat.bitDepth == 8 || bayerFormat.bitDepth == 10) &&
+ 	    bayerFormat.packing == BayerFormat::Packing::None &&
+@@ -328,7 +331,14 @@ int DebayerEGL::configure(const StreamConfiguration &inputCfg,
+ 	}
+ 
+ 	outputPixelFormat_ = outputCfg.pixelFormat;
++	outputNV12_ = outputPixelFormat_ == formats::NV12;
+ 	outputSize_ = outputCfg.size;
++
++	if (outputNV12_ && (outputSize_.width % 4 || outputSize_.height % 2)) {
++		LOG(Debayer, Error)
++			<< "NV12 output width must be a multiple of 4 and height of 2";
++		return -EINVAL;
++	}
+ 	nativeOutputSize_ = outSizeRange.max;
+ 
+ 	window_.x = ((inputCfg.size.width - outputCfg.size.width) / 2) &
+@@ -339,10 +349,11 @@ int DebayerEGL::configure(const StreamConfiguration &inputCfg,
+ 	window_.height = outputCfg.size.height;
+ 
+ 	/*
+-	 * Don't pass x,y from window_ since process() already adjusts for it.
+-	 * But crop the window to 2/3 of its width and height for speedup.
++	 * The stats are computed on the whole input frame, unlike the CPU
++	 * debayer that passes lines from the window: pass the position of
++	 * the window too, so that the stats cover the centre of the image.
+ 	 */
+-	stats_->setWindow(Rectangle(window_.size()));
++	stats_->setWindow(window_);
+ 
+ 	inputBufferCount_ = inputCfg.bufferCount;
+ 	outputBufferCount_ = outputCfg.bufferCount;
+@@ -373,8 +384,18 @@ std::vector<PixelFormat> DebayerEGL::formats(PixelFormat inputFormat)
+ std::tuple<unsigned int, unsigned int>
+ DebayerEGL::strideAndFrameSize(const PixelFormat &outputFormat, const Size &size)
+ {
+-	/* Align stride to 256 bytes as a generic GPU memory access alignment */
+ 	const PixelFormatInfo &info = PixelFormatInfo::info(outputFormat);
++
++	/*
++	 * NV12 buffers come from the platform allocator (the Android camera
++	 * HAL's gralloc buffers): use the same tight stride as the CPU
++	 * debayer, which the NV12 programs can render to with any stride that
++	 * is a multiple of 4.
++	 */
++	if (outputFormat == formats::NV12)
++		return std::make_tuple(info.stride(size.width, 0, 8), info.frameSize(size, 8));
++
++	/* Align stride to 256 bytes as a generic GPU memory access alignment */
+ 	return std::make_tuple(info.stride(size.width, 0, 256), info.frameSize(size, 256));
+ }
+ 
+@@ -404,12 +425,17 @@ void DebayerEGL::setShaderVariableValues(eGLImage &eglImageIn, const DebayerPara
+ 	 */
+ 	GLfloat scale = std::max((GLfloat)outputSize_.width / nativeOutputSize_.width,
+ 				 (GLfloat)outputSize_.height / nativeOutputSize_.height);
+-	GLfloat trans = -(1.0f - scale);
++	/*
++	 * The viewport is the input size: centre the scaled image on the
++	 * output, so that what doesn't fit is cropped evenly on both sides.
++	 */
++	GLfloat transX = (GLfloat)outputSize_.width / width_ - 1.0f;
++	GLfloat transY = (GLfloat)outputSize_.height / height_ - 1.0f;
+ 	GLfloat projMatrix[] = {
+ 		scale, 0, 0, 0,
+ 		0, scale, 0, 0,
+ 		0, 0, 1, 0,
+-		trans, trans, 0, 1
++		transX, transY, 0, 1
+ 	};
+ 	/* Static const coordinates */
+ 	static const GLfloat vcoordinates[4][2] = {
+@@ -602,17 +628,26 @@ int DebayerEGL::debayerGPU(FrameBuffer *input, FrameBuffer *output, const Debaye
+ 	eglImageIn = getCachedInputFrameBuffer(input, inMapped, inDmaSyncer);
+ 	if (!eglImageIn)
+ 		return -ENOMEM;
+-	eglImageOut = getCachedOutputFrameBuffer(output);
+-	if (!eglImageOut)
+-		return -ENOMEM;
++
++	if (outputNV12_) {
++		eglImageOut = &rgbImage_.value();
++	} else {
++		eglImageOut = getCachedOutputFrameBuffer(output);
++		if (!eglImageOut)
++			return -ENOMEM;
++	}
+ 
+ 	egl_.attachTextureToFBO(*eglImageOut);
++	glUseProgram(programId_);
+ 	setShaderVariableValues(*eglImageIn, params);
+ 
+ 	glViewport(0, 0, width_, height_);
+ 	glClear(GL_COLOR_BUFFER_BIT);
+ 	glDrawArrays(GL_TRIANGLE_FAN, 0, DEBAYER_OPENGL_COORDS);
+ 
++	if (outputNV12_ && convertToNV12(output))
++		return -ENOMEM;
++
+ 	GLenum err = glGetError();
+ 	if (err != GL_NO_ERROR) {
+ 		LOG(eGL, Error) << "Drawing scene fail " << err;
+@@ -624,6 +659,131 @@ int DebayerEGL::debayerGPU(FrameBuffer *input, FrameBuffer *output, const Debaye
+ 	return 0;
+ }
+ 
++int DebayerEGL::initNV12Shaders()
++{
++	static const GLfloat identity[] = {
++		1, 0, 0, 0,
++		0, 1, 0, 0,
++		0, 0, 1, 0,
++		0, 0, 0, 1
++	};
++
++	/* The RGB image the Bayer shader renders to, sampled bilinearly */
++	rgbImage_.emplace(GL_RGBA, outputSize_.width, outputSize_.height,
++			  outputSize_.width * 4, GL_TEXTURE3, 3);
++	egl_.createTexture2D(*rgbImage_, nullptr, GL_LINEAR);
++	if (egl_.attachTextureToFBO(*rgbImage_))
++		return -ENODEV;
++
++	for (NV12Program *program : { &nv12Y_, &nv12UV_ }) {
++		std::vector<std::string> shaderEnv;
++		GLuint vertexShaderId, fragmentShaderId;
++
++		egl_.pushEnv(shaderEnv, "#version 100");
++		if (program == &nv12UV_)
++			egl_.pushEnv(shaderEnv, "#define NV12_UV");
++
++		if (egl_.compileVertexShader(vertexShaderId, identity_vert, shaderEnv))
++			return -ENODEV;
++		utils::scope_exit vShaderGuard([&] { glDeleteShader(vertexShaderId); });
++
++		if (egl_.compileFragmentShader(fragmentShaderId, rgb_to_nv12_frag, shaderEnv))
++			return -ENODEV;
++		utils::scope_exit fShaderGuard([&] { glDeleteShader(fragmentShaderId); });
++
++		if (egl_.linkProgram(program->id, vertexShaderId, fragmentShaderId))
++			return -ENODEV;
++
++		glUseProgram(program->id);
++		program->vertexIn = glGetAttribLocation(program->id, "vertexIn");
++		glUniform1i(glGetUniformLocation(program->id, "rgb_tex"),
++			    rgbImage_->texture_unit_uniform_id_);
++		glUniform2f(glGetUniformLocation(program->id, "rgb_size"),
++			    outputSize_.width, outputSize_.height);
++		glUniformMatrix4fv(glGetUniformLocation(program->id, "proj_matrix"),
++				   1, GL_FALSE, identity);
++		glUniform1f(glGetUniformLocation(program->id, "stride_factor"), 1.0f);
++	}
++
++	GLenum err = glGetError();
++	if (err != GL_NO_ERROR) {
++		LOG(Debayer, Error) << "NV12 program setup error " << err;
++		return -ENODEV;
++	}
++
++	return 0;
++}
++
++int DebayerEGL::convertToNV12(FrameBuffer *output)
++{
++	const FrameBuffer::Plane &yPlane = output->planes()[0];
++	NV12Planes *planes = nullptr;
++
++	for (auto &[fd, p] : nv12OutCache_) {
++		if (fd == yPlane.fd) {
++			planes = &p;
++			break;
++		}
++	}
++
++	if (!planes) {
++		/* The UV plane follows the Y plane unless it has its own plane */
++		SharedFD uvFd = yPlane.fd;
++		unsigned int uvOffset = yPlane.offset + outputConfig_.stride * outputSize_.height;
++		if (output->planes().size() > 1) {
++			uvFd = output->planes()[1].fd;
++			uvOffset = output->planes()[1].offset;
++		}
++
++		if (nv12OutCache_.size() >= outputBufferCount_)
++			nv12OutCache_.pop_front();
++
++		/* Each ARGB8888 pixel holds 4 bytes of the plane */
++		NV12Planes p;
++		p.y = std::make_unique<eGLImage>(GL_RGBA, outputSize_.width / 4,
++						 outputSize_.height,
++						 outputConfig_.stride, GL_TEXTURE1, 1);
++		p.y->offset_ = yPlane.offset;
++		p.uv = std::make_unique<eGLImage>(GL_RGBA, outputSize_.width / 4,
++						  outputSize_.height / 2,
++						  outputConfig_.stride, GL_TEXTURE1, 1);
++		p.uv->offset_ = uvOffset;
++
++		if (egl_.createOutputDMABufTexture2D(*p.y, yPlane.fd.get()) ||
++		    egl_.createOutputDMABufTexture2D(*p.uv, uvFd.get())) {
++			LOG(Debayer, Error) << "Importing NV12 output DMABuf failed";
++			return -ENODEV;
++		}
++
++		nv12OutCache_.emplace_back(yPlane.fd, std::move(p));
++		planes = &nv12OutCache_.back().second;
++	}
++
++	static const GLfloat vcoordinates[4][2] = {
++		{ -1.0f, -1.0f },
++		{ -1.0f, +1.0f },
++		{ +1.0f, +1.0f },
++		{ +1.0f, -1.0f },
++	};
++
++	egl_.activateBindTexture(*rgbImage_);
++
++	for (auto [program, image] : { std::pair{ &nv12Y_, planes->y.get() },
++				       std::pair{ &nv12UV_, planes->uv.get() } }) {
++		if (egl_.attachTextureToFBO(*image))
++			return -ENODEV;
++
++		glUseProgram(program->id);
++		glEnableVertexAttribArray(program->vertexIn);
++		glVertexAttribPointer(program->vertexIn, 2, GL_FLOAT, GL_FALSE,
++				      2 * sizeof(GLfloat), vcoordinates);
++		glViewport(0, 0, image->width_, image->height_);
++		glDrawArrays(GL_TRIANGLE_FAN, 0, DEBAYER_OPENGL_COORDS);
++	}
++
++	return 0;
++}
++
+ void DebayerEGL::process(uint32_t frame, FrameBuffer *input, FrameBuffer *output, const DebayerParams &params)
+ {
+ 	egl_.assertThread();
+@@ -643,7 +803,8 @@ void DebayerEGL::process(uint32_t frame, FrameBuffer *input, FrameBuffer *output
+ 		goto error;
+ 	}
+ 
+-	metadata.planes()[0].bytesused = output->planes()[0].length;
++	for (unsigned int i = 0; i < output->planes().size(); i++)
++		metadata.planes()[i].bytesused = output->planes()[i].length;
+ 
+ 	/* Calculate stats for the whole frame */
+ 	if (frame % SwStatsCpu::kStatPerNumFrames) {
+@@ -688,7 +849,12 @@ int DebayerEGL::start()
+ 
+ 	LOG(Debayer, Debug) << "Available fragment shader texture units " << maxTextureImageUnits;
+ 
+-	if (initBayerShaders(inputPixelFormat_, outputPixelFormat_))
++	/* For NV12 the Bayer shader renders RGB in the byte order of ARGB8888 */
++	if (initBayerShaders(inputPixelFormat_,
++			     outputNV12_ ? formats::ARGB8888 : outputPixelFormat_))
++		return -EINVAL;
++
++	if (outputNV12_ && initNV12Shaders())
+ 		return -EINVAL;
+ 
+ 	if (lscEnabled_) {
+@@ -710,6 +876,13 @@ void DebayerEGL::stop()
+ {
+ 	eglImageOutCache_.clear();
+ 	eglImageInCache_.clear();
++	nv12OutCache_.clear();
++	rgbImage_.reset();
++
++	for (NV12Program *program : { &nv12Y_, &nv12UV_ }) {
++		if (program->id)
++			glDeleteProgram(std::exchange(program->id, 0));
++	}
+ 
+ 	eglImageLscLookup_.reset();
+ 	lscLutVersion_.reset();
+diff --git a/src/libcamera/software_isp/debayer_egl.h b/src/libcamera/software_isp/debayer_egl.h
+index cbbc6a4..28b3b2b 100644
+--- a/src/libcamera/software_isp/debayer_egl.h
++++ b/src/libcamera/software_isp/debayer_egl.h
+@@ -11,6 +11,7 @@
+ 
+ #include <deque>
+ #include <memory>
++#include <optional>
+ #include <stdint.h>
+ #include <tuple>
+ #include <vector>
+@@ -71,6 +72,8 @@ private:
+ 
+ 	eGLImage *getCachedInputFrameBuffer(FrameBuffer *input, std::optional<MappedFrameBuffer> *inMapped, std::optional<DmaSyncer> *inDmaSyncer);
+ 	eGLImage *getCachedOutputFrameBuffer(FrameBuffer *output);
++	int initNV12Shaders();
++	int convertToNV12(FrameBuffer *output);
+ 
+ 	/* Shader program identifiers */
+ 	GLuint vertexShaderId_ = 0;
+@@ -80,6 +83,26 @@ private:
+ 	/* Pointer to object representing input texture */
+ 	std::deque<std::pair<SharedFD, std::unique_ptr<eGLImage>>> eglImageInCache_;
+ 	std::deque<std::pair<SharedFD, std::unique_ptr<eGLImage>>> eglImageOutCache_;
++
++	/*
++	 * NV12 output: the Bayer shader renders RGB to rgbImage_, which the
++	 * NV12 programs then write to the Y and UV planes of the output.
++	 */
++	struct NV12Planes {
++		std::unique_ptr<eGLImage> y;
++		std::unique_ptr<eGLImage> uv;
++	};
++	struct NV12Program {
++		GLuint id = 0;
++		GLint vertexIn;
++		GLint rgbTex;
++		GLint rgbSize;
++	};
++	bool outputNV12_ = false;
++	std::optional<eGLImage> rgbImage_;
++	std::deque<std::pair<SharedFD, NV12Planes>> nv12OutCache_;
++	NV12Program nv12Y_;
++	NV12Program nv12UV_;
+ 	unsigned int inputBufferCount_;
+ 	unsigned int outputBufferCount_;
+ 
+-- 
+2.55.0
+

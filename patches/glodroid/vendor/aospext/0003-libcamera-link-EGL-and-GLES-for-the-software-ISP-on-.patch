@@ -1,0 +1,30 @@
+From fa1abde38c7db1e42b16ccf2af52793365e31bf8 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 09:46:14 -0600
+Subject: [PATCH 3/4] libcamera: link EGL and GLES for the software ISP on the
+ GPU
+
+libcamera's software ISP can debayer with EGL and GLES 2 (-Dsoftisp-gpu).
+Link the Android libEGL and libGLESv2.
+---
+ meson_libcamera.mk | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/meson_libcamera.mk b/meson_libcamera.mk
+index d03edcf..5eb8505 100644
+--- a/meson_libcamera.mk
++++ b/meson_libcamera.mk
+@@ -13,8 +13,8 @@ include $(LOCAL_PATH)/aospext_cleanup.mk
+ AOSPEXT_PROJECT_NAME := LIBCAMERA
+ AOSPEXT_BUILD_SYSTEM := meson
+ 
+-LOCAL_SHARED_LIBRARIES := libc libexif libjpeg libdl libevent libcrypto libyaml_vendor libyuv libui libutils
+-AOSPEXT_GEN_PKGCONFIGS := libexif libjpeg dl libevent_pthreads libcrypto yaml-0.1 libyuv libui
++LOCAL_SHARED_LIBRARIES := libc libexif libjpeg libdl libevent libcrypto libyaml_vendor libyuv libui libutils libEGL libGLESv2
++AOSPEXT_GEN_PKGCONFIGS := libexif libjpeg dl libevent_pthreads libcrypto yaml-0.1 libyuv libui egl glesv2
+ 
+ MESON_BUILD_ARGUMENTS := \
+     -Dwerror=false                                                           \
+-- 
+2.55.0
+

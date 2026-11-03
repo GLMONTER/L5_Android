@@ -165,8 +165,10 @@ PRODUCT_PACKAGES += \
 PRODUCT_VENDOR_PROPERTIES += ro.hardware.camera=libcamera
 PRODUCT_COPY_FILES += \
     device/purism/librem5/camera/camera_hal.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/camera_hal.yaml \
+    device/purism/librem5/camera/configuration.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/configuration.yaml \
     device/purism/librem5/camera/media_profiles_V1_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml \
     device/purism/librem5/camera/hi846.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/shared/libcamera/ipa/softisp/hi846.yaml \
     device/purism/librem5/camera/s5k3l6xx.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/shared/libcamera/ipa/softisp/s5k3l6xx.yaml \
     frameworks/native/data/etc/android.hardware.camera.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.xml \
+    frameworks/native/data/etc/android.hardware.camera.autofocus.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.autofocus.xml \
     frameworks/native/data/etc/android.hardware.camera.front.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.camera.front.xml

@@ -8,6 +8,9 @@
 # Purism's Millipixels config (config/purism,librem5r4.ini): XYZ(D50)->sRGB (Bradford) x
 # ForwardMatrix, rows normalised to 1 so white is preserved. One matrix for all colour
 # temperatures until per-illuminant calibration exists.
+#
+# Af: contrast AF driving the DW9714 voice coil (V4L2_CID_FOCUS_ABSOLUTE, 0-1023). Low codes
+# focus far. The scan range and the infinity/macro codes are first estimates, to be measured.
 %YAML 1.1
 ---
 version: 1
@@ -22,4 +25,11 @@ algorithms:
                 -0.018, -0.101,  1.119 ]
   - Adjust:
   - Agc:
+  - Af:
+      range: [ 0, 800 ]
+      infinity: 100
+      macro: 700
+      maxDioptres: 10
+      step: 50
+      default: 250
 ...

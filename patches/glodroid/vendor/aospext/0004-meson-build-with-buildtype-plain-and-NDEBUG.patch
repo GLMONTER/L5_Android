@@ -1,0 +1,33 @@
+From 0ab5640c676b3a85e3abb90d2bfc78e691797412 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 09:46:14 -0600
+Subject: [PATCH 4/4] meson: build with buildtype=plain and NDEBUG
+
+buildtype=debug compiled asserts in and made Mesa build with MESA_DEBUG=1,
+which adds runtime checks. Build meson projects as plain release builds
+(-Db_ndebug=true) with the AOSP target flags (-O2) the toolchain wrapper
+passes; the -O0 of buildtype=debug was already overridden by them.
+---
+ aospext_cross_compile.mk | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/aospext_cross_compile.mk b/aospext_cross_compile.mk
+index f66194b..27fc0d8 100644
+--- a/aospext_cross_compile.mk
++++ b/aospext_cross_compile.mk
+@@ -47,8 +47,11 @@ else
+ $(AOSPEXT_INTERNAL_BUILD_TARGET): MESON_RUST_TARGET  := $(subst arm64,aarch64,$(TARGET_$(AOSPEXT_ARCH_PREFIX)ARCH))-linux-android
+ endif
+ 
++# buildtype=plain + b_ndebug: a release build with the AOSP target flags (-O2) the toolchain
++# wrapper passes. buildtype=debug compiled asserts in and made Mesa build with MESA_DEBUG=1
++# (extra runtime checks); its -O0 was already overridden by the wrapper's later -O2.
+ $(AOSPEXT_INTERNAL_BUILD_TARGET): MESON_BUILD_ARGUMENTS:=--prefix /vendor --libdir lib$(LIBDIR_SUFFIX) --datadir etc/shared --libexecdir bin \
+-                                                         --sbindir bin --localstatedir=/mnt/var --buildtype=debug $(MESON_BUILD_ARGUMENTS)
++                                                         --sbindir bin --localstatedir=/mnt/var --buildtype=plain -Db_ndebug=true $(MESON_BUILD_ARGUMENTS)
+ 
+ # cargo
+ $(AOSPEXT_INTERNAL_BUILD_TARGET): CARGO_RUST_TARGET  := $(subst arm64,aarch64,$(TARGET_$(AOSPEXT_ARCH_PREFIX)ARCH))-linux-android
+-- 
+2.55.0
+

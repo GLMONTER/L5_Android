@@ -7,3 +7,7 @@ r_dir_file(hal_camera_default, sysfs)
 # stable-C minigbm mapper for CPU access to the framework's gralloc buffers
 hal_client_domain(hal_camera_default, hal_graphics_allocator)
 allow hal_camera_default hal_graphics_mapper_service:service_manager find;
+
+# libcamera's software ISP can debayer on the GPU (EGL/GLES2 through Mesa) when its
+# configuration.yaml selects "mode: gpu"
+gpu_sphal_use(hal_camera_default)

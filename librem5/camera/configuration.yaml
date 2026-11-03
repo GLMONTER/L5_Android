@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# libcamera global configuration (/vendor/etc/libcamera/configuration.yaml).
+#
+# Software ISP: debayer on the CPU with 4 threads. On the Librem 5 the GPU debayer (GC7000L,
+# etnaviv, GLES2) takes ~40 ms for a 720p frame against ~35 ms for 1080p on 4 Cortex-A53
+# threads, so the GPU path ("mode: gpu", built in) is slower here. The default of 2 threads
+# takes ~52 ms for 1080p.
+%YAML 1.1
+---
+version: 1
+configuration:
+  software_isp:
+    mode: cpu
+    threads: 4
+...

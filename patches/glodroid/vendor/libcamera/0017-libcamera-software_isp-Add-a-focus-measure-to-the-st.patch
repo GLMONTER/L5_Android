@@ -1,0 +1,214 @@
+From f51d40ae60f00f115ccea98e5eaca759bd2cd7fd Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 09:46:08 -0600
+Subject: [PATCH 17/19] libcamera: software_isp: Add a focus measure to the
+ statistics
+
+For contrast detection autofocus, sum the squared differences of
+horizontally adjacent green pixels of the same row in the centre half of
+the statistics window (in both directions), along with the sum and count of
+the green pixels so that the IPA can normalise the measure by the
+brightness. Computed for the unpacked Bayer formats, on the lines the other
+statistics use.
+---
+ .../internal/software_isp/swisp_stats.h       | 18 ++++++
+ .../internal/software_isp/swstats_cpu.h       | 14 +++++
+ src/libcamera/software_isp/swstats_cpu.cpp    | 56 +++++++++++++++++++
+ 3 files changed, 88 insertions(+)
+
+diff --git a/include/libcamera/internal/software_isp/swisp_stats.h b/include/libcamera/internal/software_isp/swisp_stats.h
+index 65d826f..1218507 100644
+--- a/include/libcamera/internal/software_isp/swisp_stats.h
++++ b/include/libcamera/internal/software_isp/swisp_stats.h
+@@ -27,6 +27,11 @@ namespace libcamera {
+  * - The histogram groups pixels in bins based on their luminance and counts
+  *   the number of pixels in each bin. Saturated pixels are included.
+  *
++ * - The focus measure sums the squared differences of horizontally adjacent
++ *   green pixels of the same row in the centre of the image (the AF window).
++ *   It peaks when the image is sharp. Frame formats it is not computed for
++ *   leave afSamples at 0.
++ *
+  * The value types are large enough to not overflow. Should they still overflow
+  * for some reason, no check is performed and they wrap around.
+  */
+@@ -56,6 +61,19 @@ struct SwIspStats {
+ 	 * \brief A histogram of luminance values of all the sampled pixels
+ 	 */
+ 	Histogram yHistogram;
++	/**
++	 * \brief Sum of the squared differences of the green pixel pairs in
++	 * the AF window
++	 */
++	uint64_t afSharpness;
++	/**
++	 * \brief Sum of the values of the green pixels in the AF window
++	 */
++	uint64_t afSum;
++	/**
++	 * \brief Number of green pixel pairs accumulated in \a afSharpness
++	 */
++	uint64_t afSamples;
+ };
+ 
+ } /* namespace libcamera */
+diff --git a/include/libcamera/internal/software_isp/swstats_cpu.h b/include/libcamera/internal/software_isp/swstats_cpu.h
+index 5518709..5c81418 100644
+--- a/include/libcamera/internal/software_isp/swstats_cpu.h
++++ b/include/libcamera/internal/software_isp/swstats_cpu.h
+@@ -68,6 +68,7 @@ public:
+ 			return;
+ 
+ 		(this->*stats0_)(src, stats_[statsBufferIndex]);
++		processAfLine(y - window_.y, src, stats_[statsBufferIndex]);
+ 	}
+ 
+ 	void processLine2(uint32_t frame, unsigned int y, const uint8_t *src[], unsigned int statsBufferIndex = 0)
+@@ -104,11 +105,24 @@ private:
+ 
+ 	void processBayerFrame2(MappedFrameBuffer &in);
+ 
++	/* Focus measure, for unpacked Bayer formats */
++	template<typename T>
++	void statsAfLine(const uint8_t *src[], SwIspStats &stats);
++	void processAfLine(unsigned int y, const uint8_t *src[], SwIspStats &stats)
++	{
++		if (statsAf_ && y >= static_cast<unsigned int>(afWindow_.y) &&
++		    y < afWindow_.y + afWindow_.height)
++			(this->*statsAf_)(src, stats);
++	}
++
+ 	processFrameFn processFrame_;
+ 
+ 	/* Variables set by configure(), used every line */
+ 	statsProcessFn stats0_;
+ 	statsProcessFn stats2_;
++	statsProcessFn statsAf_ = nullptr;
++	/* The AF window, relative to window_ */
++	Rectangle afWindow_;
+ 	bool swapLines_;
+ 
+ 	unsigned int ySkipMask_;
+diff --git a/src/libcamera/software_isp/swstats_cpu.cpp b/src/libcamera/software_isp/swstats_cpu.cpp
+index 7463381..536424a 100644
+--- a/src/libcamera/software_isp/swstats_cpu.cpp
++++ b/src/libcamera/software_isp/swstats_cpu.cpp
+@@ -396,6 +396,38 @@ void SwStatsCpu::statsGBRG12PLine0(const uint8_t *src[], SwIspStats &stats)
+  *
+  * This may only be called after a successful setWindow() call.
+  */
++/*
++ * The focus measure on one line pair, on the green pixels of the BGGR order
++ * the lines are normalised to: the even line has them at the odd positions
++ * (B G B G), the odd line at the even positions (G R G R).
++ */
++template<typename T>
++void SwStatsCpu::statsAfLine(const uint8_t *src[], SwIspStats &stats)
++{
++	const T *src0 = reinterpret_cast<const T *>(src[1]) + window_.x;
++	const T *src1 = reinterpret_cast<const T *>(src[2]) + window_.x;
++	const unsigned int xEnd = afWindow_.x + afWindow_.width;
++	uint64_t sharpness = 0;
++	uint64_t sum = 0;
++
++	if (swapLines_)
++		std::swap(src0, src1);
++
++	for (unsigned int x = afWindow_.x; x < xEnd; x += 2) {
++		const int g0 = src0[x + 1];
++		const int d0 = src0[x + 3] - g0;
++		const int g1 = src1[x];
++		const int d1 = src1[x + 2] - g1;
++
++		sharpness += d0 * d0 + d1 * d1;
++		sum += g0 + g1;
++	}
++
++	stats.afSharpness += sharpness;
++	stats.afSum += sum;
++	stats.afSamples += afWindow_.width;
++}
++
+ void SwStatsCpu::startFrame(uint32_t frame)
+ {
+ 	if (frame % kStatPerNumFrames)
+@@ -408,6 +440,9 @@ void SwStatsCpu::startFrame(uint32_t frame)
+ 		s.sum_ = RGB<uint64_t>({ 0, 0, 0 });
+ 		s.numPixels_ = 0;
+ 		s.yHistogram.fill(0);
++		s.afSharpness = 0;
++		s.afSum = 0;
++		s.afSamples = 0;
+ 	}
+ }
+ 
+@@ -426,9 +461,15 @@ void SwStatsCpu::finishFrame(uint32_t frame, uint32_t bufferId)
+ 		sharedStats_->sum_ = RGB<uint64_t>({ 0, 0, 0 });
+ 		sharedStats_->numPixels_ = 0;
+ 		sharedStats_->yHistogram.fill(0);
++		sharedStats_->afSharpness = 0;
++		sharedStats_->afSum = 0;
++		sharedStats_->afSamples = 0;
+ 		for (const auto &s : stats_) {
+ 			sharedStats_->sum_ += s.sum_;
+ 			sharedStats_->numPixels_ += s.numPixels_;
++			sharedStats_->afSharpness += s.afSharpness;
++			sharedStats_->afSum += s.afSum;
++			sharedStats_->afSamples += s.afSamples;
+ 			for (unsigned int j = 0; j < SwIspStats::kYHistogramSize; j++)
+ 				sharedStats_->yHistogram[j] += s.yHistogram[j];
+ 		}
+@@ -487,6 +528,7 @@ int SwStatsCpu::configure(const StreamConfiguration &inputCfg, unsigned int stat
+ {
+ 	stride_ = inputCfg.stride;
+ 	stats_.resize(statsBufferCount);
++	statsAf_ = nullptr;
+ 
+ 	BayerFormat bayerFormat =
+ 		BayerFormat::fromPixelFormat(inputCfg.pixelFormat);
+@@ -497,14 +539,17 @@ int SwStatsCpu::configure(const StreamConfiguration &inputCfg, unsigned int stat
+ 		switch (bayerFormat.bitDepth) {
+ 		case 8:
+ 			stats0_ = &SwStatsCpu::statsBGGR8Line0;
++			statsAf_ = &SwStatsCpu::statsAfLine<uint8_t>;
+ 			sumShift_ = 0;
+ 			return 0;
+ 		case 10:
+ 			stats0_ = &SwStatsCpu::statsBGGR10Line0;
++			statsAf_ = &SwStatsCpu::statsAfLine<uint16_t>;
+ 			sumShift_ = 2;
+ 			return 0;
+ 		case 12:
+ 			stats0_ = &SwStatsCpu::statsBGGR12Line0;
++			statsAf_ = &SwStatsCpu::statsAfLine<uint16_t>;
+ 			sumShift_ = 4;
+ 			return 0;
+ 		}
+@@ -588,6 +633,16 @@ void SwStatsCpu::setWindow(const Rectangle &window)
+ 	window_.width = (window_.width > xShift_ ? window_.width - xShift_ : 0);
+ 	window_.width &= ~(patternSize_.width - 1);
+ 	window_.height &= ~(patternSize_.height - 1);
++
++	/*
++	 * The AF window is the centre half of the window in both directions,
++	 * aligned to the Bayer pattern. statsAfLine() reads up to 3 pixels
++	 * past the end of each pair, which stays inside the window.
++	 */
++	afWindow_.x = (window_.width / 4) & ~1U;
++	afWindow_.y = (window_.height / 4) & ~1U;
++	afWindow_.width = (window_.width / 2) & ~1U;
++	afWindow_.height = (window_.height / 2) & ~1U;
+ }
+ 
+ void SwStatsCpu::processBayerFrame2(MappedFrameBuffer &in)
+@@ -608,6 +663,7 @@ void SwStatsCpu::processBayerFrame2(MappedFrameBuffer &in)
+ 		linePointers[1] = src;
+ 		linePointers[2] = src + stride_;
+ 		(this->*stats0_)(linePointers, stats_[0]);
++		processAfLine(y, linePointers, stats_[0]);
+ 		src += stride_ * 2;
+ 	}
+ }
+-- 
+2.55.0
+
