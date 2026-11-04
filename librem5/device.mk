@@ -126,6 +126,19 @@ PRODUCT_PACKAGES += librem5-hks-monitor
 # syscalls Mesa makes when minigbm maps a frame
 PRODUCT_COPY_FILES += \
     device/purism/librem5/codecs/mediaswcodec.policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/mediaswcodec.policy
+# Video: hardware decoders (Hantro G1/G2) through FFmpeg's V4L2 Request API in the FFmpeg Codec2
+# service, IComponentStore/default (BoardConfig.mk builds both with aospext)
+# The framework only lists AIDL Codec2 stores with the AIDL HAL selected; with
+# ro.vendor.api_level < 202404 it defaults to HIDL and sees just the software store.
+PRODUCT_VENDOR_PROPERTIES += media.c2.hal.selection=aidl
+PRODUCT_PACKAGES += \
+    android.hardware.media.c2-service-ffmpeg \
+    android.hardware.media.c2-service-ffmpeg.rc \
+    android.hardware.media.c2-service-ffmpeg.xml \
+    android.hardware.media.c2-ffmpeg-extended-seccomp_policy \
+    android.hardware.media.c2-default-seccomp_policy
+PRODUCT_COPY_FILES += \
+    device/purism/librem5/codecs/media_codecs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs.xml
 # Encoders fed from a Surface (screen recording, camera video): the framework creates the input
 # surface, the software Codec2 service has none (CCodec::createInputSurface crashes otherwise)
 PRODUCT_VENDOR_PROPERTIES += debug.stagefright.c2inputsurface=-1

@@ -1,0 +1,78 @@
+From e334ecbe98db20d099bf4dafc6616b9f042fd5c0 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 16:37:00 -0600
+Subject: [PATCH] Register as the default Codec2 store when installed in
+ /vendor
+
+Android's framework compatibility matrix only accepts IComponentStore
+instances named default[0-9]* or vendor[0-9]*_software, so a vendor
+build serves "default" (the device's hardware codecs).
+---
+ main.cpp                                      |  6 +++++
+ meson.build                                   |  2 +-
+ ...droid.hardware.media.c2-service-ffmpeg.xml | 22 +++++++++++++++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+ create mode 100644 vendor/android.hardware.media.c2-service-ffmpeg.xml
+
+diff --git a/main.cpp b/main.cpp
+index ae34186..d6bc40d 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -66,7 +66,13 @@ int main() {
+     std::shared_ptr<IComponentStore> store = ndk::SharedRefBase::make<utils::ComponentStore>(
+             std::make_shared<android::C2FFMPEGComponentStore>());
+ 
++#ifdef FFMPEG_CODEC2_VENDOR_INSTALL
++    // The device's Codec2 HAL: the framework compatibility matrix only accepts "default[0-9]*"
++    // (hardware) and "vendor[0-9]*_software" instances.
++    const std::string instance = std::string() + IComponentStore::descriptor + "/default";
++#else
+     const std::string instance = std::string() + IComponentStore::descriptor + "/ffmpeg";
++#endif
+     binder_status_t status = AServiceManager_addService(store->asBinder().get(), instance.c_str());
+     CHECK(status == STATUS_OK);
+ 
+diff --git a/meson.build b/meson.build
+index 462a4bf..f0a8d89 100644
+--- a/meson.build
++++ b/meson.build
+@@ -34,7 +34,7 @@ executable(
+ 
+ install_data('vendor/android.hardware.media.c2-service-ffmpeg.rc',
+              install_dir : get_option('sysconfdir') / 'init')
+-install_data('android.hardware.media.c2-service-ffmpeg.xml',
++install_data('vendor/android.hardware.media.c2-service-ffmpeg.xml',
+              install_dir : get_option('sysconfdir') / 'vintf' / 'manifest')
+ install_data('android.hardware.media.c2-ffmpeg-extended-seccomp_policy',
+              install_dir : get_option('sysconfdir') / 'seccomp_policy')
+diff --git a/vendor/android.hardware.media.c2-service-ffmpeg.xml b/vendor/android.hardware.media.c2-service-ffmpeg.xml
+new file mode 100644
+index 0000000..0496613
+--- /dev/null
++++ b/vendor/android.hardware.media.c2-service-ffmpeg.xml
+@@ -0,0 +1,22 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Copyright (C) 2022 Michael Goffioul <michael.goffioul@gmail.com>
++
++     Licensed under the Apache License, Version 2.0 (the "License");
++     you may not use this file except in compliance with the License.
++     You may obtain a copy of the License at
++
++          http://www.apache.org/licenses/LICENSE-2.0
++
++     Unless required by applicable law or agreed to in writing, software
++     distributed under the License is distributed on an "AS IS" BASIS,
++     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++     See the License for the specific language governing permissions and
++     limitations under the License.
++-->
++<manifest version="1.0" type="device">
++    <hal format="aidl">
++        <name>android.hardware.media.c2</name>
++        <version>1</version>
++        <fqname>IComponentStore/default</fqname>
++    </hal>
++</manifest>
+-- 
+2.55.0
+

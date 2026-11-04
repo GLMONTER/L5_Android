@@ -1,0 +1,350 @@
+From d949fefcb53b6019d364e59e74180cd046aba068 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 16:34:49 -0600
+Subject: [PATCH 2/2] Decode with V4L2 Request API hardware and write any YUV
+ output layout
+
+Use FFmpeg's hwaccel for every codec a V4L2 stateless decoder may support
+(AV1, H.264, HEVC, MPEG-2, VP8, VP9), not just HEVC behind a property;
+persist.vendor.ffmpeg_codec2.hwaccel=false turns it off. FFmpeg falls
+back to software decoding for streams the hardware can't handle.
+
+Keep the decoder's DRM PRIME frames and map them when copying into the
+output buffer, instead of transferring each frame to a YUV420P copy
+first: one copy instead of two.
+
+Ask for flexible YUV (HAL_PIXEL_FORMAT_YCBCR_420_888) and describe the
+buffer gralloc returns by its planar layout (I420, NV12 or NV21). The
+copy assumed planar chroma, which garbles colour on gralloc
+implementations that lay flexible YUV out as NV12 (minigbm). Same-format
+frames are copied plane by plane; others go through swscale.
+
+Don't include libswresample's private header (not installed with
+FFmpeg): keep the audio converter's parameters in the component.
+---
+ C2FFMPEGAudioDecodeComponent.cpp |  21 ++++--
+ C2FFMPEGAudioDecodeComponent.h   |   7 ++
+ C2FFMPEGVideoDecodeComponent.cpp | 110 +++++++++++++++++++++----------
+ C2FFMPEGVideoDecodeInterface.cpp |   2 +-
+ ffmpeg_utils/ffmpeg_hwaccel.c    |  59 +++++------------
+ ffmpeg_utils/ffmpeg_utils.h      |   2 +
+ 6 files changed, 118 insertions(+), 83 deletions(-)
+
+diff --git a/C2FFMPEGAudioDecodeComponent.cpp b/C2FFMPEGAudioDecodeComponent.cpp
+index 2b2c910..ff42255 100644
+--- a/C2FFMPEGAudioDecodeComponent.cpp
++++ b/C2FFMPEGAudioDecodeComponent.cpp
+@@ -20,7 +20,6 @@
+ 
+ #include <SimpleC2Interface.h>
+ #include "C2FFMPEGAudioDecodeComponent.h"
+-#include <libswresample/swresample_internal.h>
+ 
+ #define DEBUG_FRAMES 0
+ #define DEBUG_EXTRADATA 0
+@@ -328,6 +327,7 @@ void C2FFMPEGAudioDecodeComponent::deInitDecoder() {
+     if (mSwrCtx) {
+         swr_free(&mSwrCtx);
+     }
++    av_channel_layout_uninit(&mSwrInChLayout);
+     if (mCodecHelper) {
+         delete mCodecHelper;
+         mCodecHelper = NULL;
+@@ -391,12 +391,12 @@ c2_status_t C2FFMPEGAudioDecodeComponent::receiveFrame(bool* hasFrame) {
+ 
+ c2_status_t C2FFMPEGAudioDecodeComponent::getOutputBuffer(C2WriteView* outBuffer) {
+     if (! mSwrCtx ||
+-        mSwrCtx->in_sample_fmt != mFrame->format ||
+-        mSwrCtx->in_sample_rate != mFrame->sample_rate ||
+-        av_channel_layout_compare(&mSwrCtx->in_ch_layout, &mFrame->ch_layout) != 0 ||
+-        mSwrCtx->out_sample_fmt != mTargetSampleFormat ||
+-        mSwrCtx->out_sample_rate != mTargetSampleRate ||
+-        mSwrCtx->out_ch_layout.nb_channels != mTargetChannels) {
++        mSwrInFormat != mFrame->format ||
++        mSwrInSampleRate != mFrame->sample_rate ||
++        av_channel_layout_compare(&mSwrInChLayout, &mFrame->ch_layout) != 0 ||
++        mSwrOutFormat != mTargetSampleFormat ||
++        mSwrOutSampleRate != mTargetSampleRate ||
++        mSwrOutChannels != mTargetChannels) {
+         if (mSwrCtx) {
+             swr_free(&mSwrCtx);
+         }
+@@ -418,6 +418,13 @@ c2_status_t C2FFMPEGAudioDecodeComponent::getOutputBuffer(C2WriteView* outBuffer
+             }
+             return C2_NO_MEMORY;
+         }
++        mSwrInFormat = mFrame->format;
++        mSwrInSampleRate = mFrame->sample_rate;
++        av_channel_layout_uninit(&mSwrInChLayout);
++        av_channel_layout_copy(&mSwrInChLayout, &mFrame->ch_layout);
++        mSwrOutFormat = mTargetSampleFormat;
++        mSwrOutSampleRate = mTargetSampleRate;
++        mSwrOutChannels = mTargetChannels;
+ 
+         ALOGD("getOutputBuffer: created audio converter - sr=%d, ch=%d, fmt=%s => sr=%d, ch=%d, fmt=%s",
+               mFrame->sample_rate, mFrame->ch_layout.nb_channels, av_get_sample_fmt_name((enum AVSampleFormat)mFrame->format),
+diff --git a/C2FFMPEGAudioDecodeComponent.h b/C2FFMPEGAudioDecodeComponent.h
+index a737209..4d41d77 100644
+--- a/C2FFMPEGAudioDecodeComponent.h
++++ b/C2FFMPEGAudioDecodeComponent.h
+@@ -67,6 +67,13 @@ private:
+     bool mEOSSignalled;
+     // Audio resampling
+     struct SwrContext* mSwrCtx;
++    // The converter's parameters (SwrContext is opaque outside libswresample)
++    int mSwrInFormat = -1;
++    int mSwrInSampleRate = 0;
++    AVChannelLayout mSwrInChLayout = {};
++    enum AVSampleFormat mSwrOutFormat = AV_SAMPLE_FMT_NONE;
++    int mSwrOutSampleRate = 0;
++    int mSwrOutChannels = 0;
+     enum AVSampleFormat mTargetSampleFormat;
+     int mTargetSampleRate;
+     int mTargetChannels;
+diff --git a/C2FFMPEGVideoDecodeComponent.cpp b/C2FFMPEGVideoDecodeComponent.cpp
+index fd8ce98..8b1d1a1 100644
+--- a/C2FFMPEGVideoDecodeComponent.cpp
++++ b/C2FFMPEGVideoDecodeComponent.cpp
+@@ -98,12 +98,7 @@ c2_status_t C2FFMPEGVideoDecodeComponent::openDecoder() {
+     mExtradataReady = true;
+ 
+     // Find decoder again as codec_id may have changed.
+-    if (mCtx->codec_id == AV_CODEC_ID_H264 &&
+-            base::GetBoolProperty("persist.vendor.ffmpeg_codec2.v4l2.h264", false)) {
+-        mCtx->codec = avcodec_find_decoder_by_name("h264_v4l2m2m");
+-    } else {
+-        mCtx->codec = avcodec_find_decoder(mCtx->codec_id);
+-    }
++    mCtx->codec = avcodec_find_decoder(mCtx->codec_id);
+ 
+     if (! mCtx->codec) {
+         ALOGE("openDecoder: ffmpeg video decoder failed to find codec %d", mCtx->codec_id);
+@@ -253,34 +248,83 @@ c2_status_t C2FFMPEGVideoDecodeComponent::receiveFrame(bool* hasPicture) {
+ }
+ 
+ c2_status_t C2FFMPEGVideoDecodeComponent::getOutputBuffer(C2GraphicView* outBuffer) {
+-    uint8_t* data[4];
+-    int linesize[4];
+-    C2PlanarLayout layout = outBuffer->layout();
+-    struct SwsContext* currentImgConvertCtx = mImgConvertCtx;
+-
+-    data[0] = outBuffer->data()[C2PlanarLayout::PLANE_Y];
+-    data[1] = outBuffer->data()[C2PlanarLayout::PLANE_U];
+-    data[2] = outBuffer->data()[C2PlanarLayout::PLANE_V];
+-    linesize[0] = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
+-    linesize[1] = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
+-    linesize[2] = layout.planes[C2PlanarLayout::PLANE_V].rowInc;
+-
+-    mImgConvertCtx = sws_getCachedContext(currentImgConvertCtx,
+-           mFrame->width, mFrame->height, (AVPixelFormat)mFrame->format,
+-           mFrame->width, mFrame->height, AV_PIX_FMT_YUV420P,
+-           SWS_BICUBIC, NULL, NULL, NULL);
+-    if (mImgConvertCtx && mImgConvertCtx != currentImgConvertCtx) {
+-        ALOGD("getOutputBuffer: created video converter - %s => %s",
+-              av_get_pix_fmt_name((AVPixelFormat)mFrame->format), av_get_pix_fmt_name(AV_PIX_FMT_YUV420P));
+-
+-    } else if (! mImgConvertCtx) {
+-        ALOGE("getOutputBuffer: cannot initialize the conversion context");
+-        return C2_NO_MEMORY;
++    const C2PlanarLayout layout = outBuffer->layout();
++    const C2PlaneInfo& yPlane = layout.planes[C2PlanarLayout::PLANE_Y];
++    const C2PlaneInfo& uPlane = layout.planes[C2PlanarLayout::PLANE_U];
++    const C2PlaneInfo& vPlane = layout.planes[C2PlanarLayout::PLANE_V];
++    uint8_t* const y = outBuffer->data()[C2PlanarLayout::PLANE_Y];
++    uint8_t* const u = outBuffer->data()[C2PlanarLayout::PLANE_U];
++    uint8_t* const v = outBuffer->data()[C2PlanarLayout::PLANE_V];
++    uint8_t* data[4] = { y, NULL, NULL, NULL };
++    int linesize[4] = { yPlane.rowInc, 0, 0, 0 };
++    enum AVPixelFormat dstFormat;
++
++    // Describe the output buffer (gralloc picks its layout for flexible YUV) as an FFmpeg format.
++    if (layout.type != C2PlanarLayout::TYPE_YUV || yPlane.colInc != 1) {
++        ALOGE("getOutputBuffer: unsupported output layout (type %d)", layout.type);
++        return C2_BAD_VALUE;
++    } else if (uPlane.colInc == 1 && vPlane.colInc == 1) {
++        dstFormat = AV_PIX_FMT_YUV420P;
++        data[1] = u;
++        data[2] = v;
++        linesize[1] = uPlane.rowInc;
++        linesize[2] = vPlane.rowInc;
++    } else if (uPlane.colInc == 2 && vPlane.colInc == 2 && v == u + 1) {
++        dstFormat = AV_PIX_FMT_NV12;
++        data[1] = u;
++        linesize[1] = uPlane.rowInc;
++    } else if (uPlane.colInc == 2 && vPlane.colInc == 2 && u == v + 1) {
++        dstFormat = AV_PIX_FMT_NV21;
++        data[1] = v;
++        linesize[1] = vPlane.rowInc;
++    } else {
++        ALOGE("getOutputBuffer: unsupported chroma layout (colInc %d/%d)",
++              uPlane.colInc, vPlane.colInc);
++        return C2_BAD_VALUE;
+     }
+ 
+-    sws_scale(mImgConvertCtx, mFrame->data, mFrame->linesize,
+-              0, mFrame->height, data, linesize);
++    // Hardware frames: read the decoder's buffer in place (a mapping), or copy it out.
++    AVFrame* src = mFrame;
++    AVFrame* sw = NULL;
++    if (mFrame->hw_frames_ctx) {
++        sw = av_frame_alloc();
++        if (! sw) {
++            return C2_NO_MEMORY;
++        }
++        int err = av_hwframe_map(sw, mFrame, AV_HWFRAME_MAP_READ);
++        if (err < 0) {
++            av_frame_unref(sw);
++            err = av_hwframe_transfer_data(sw, mFrame, 0);
++        }
++        if (err < 0) {
++            ALOGE("getOutputBuffer: cannot read the hardware frame: %s", av_err2str(err));
++            av_frame_free(&sw);
++            return C2_CORRUPTED;
++        }
++        src = sw;
++    }
++
++    if (src->format == dstFormat) {
++        av_image_copy2(data, linesize, src->data, src->linesize, dstFormat,
++                       mFrame->width, mFrame->height);
++    } else {
++        struct SwsContext* currentImgConvertCtx = mImgConvertCtx;
++        mImgConvertCtx = sws_getCachedContext(currentImgConvertCtx,
++               mFrame->width, mFrame->height, (AVPixelFormat)src->format,
++               mFrame->width, mFrame->height, dstFormat,
++               SWS_BICUBIC, NULL, NULL, NULL);
++        if (mImgConvertCtx && mImgConvertCtx != currentImgConvertCtx) {
++            ALOGD("getOutputBuffer: created video converter - %s => %s",
++                  av_get_pix_fmt_name((AVPixelFormat)src->format), av_get_pix_fmt_name(dstFormat));
++        } else if (! mImgConvertCtx) {
++            ALOGE("getOutputBuffer: cannot initialize the conversion context");
++            av_frame_free(&sw);
++            return C2_NO_MEMORY;
++        }
++        sws_scale(mImgConvertCtx, src->data, src->linesize, 0, mFrame->height, data, linesize);
++    }
+ 
++    av_frame_free(&sw);
+     return C2_OK;
+ }
+ 
+@@ -459,12 +503,12 @@ c2_status_t C2FFMPEGVideoDecodeComponent::outputFrame(
+ 
+     std::shared_ptr<C2GraphicBlock> block;
+ 
+-    err = pool->fetchGraphicBlock(mFrame->width, mFrame->height, HAL_PIXEL_FORMAT_YV12,
++    err = pool->fetchGraphicBlock(mFrame->width, mFrame->height, HAL_PIXEL_FORMAT_YCBCR_420_888,
+                                   { C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE }, &block);
+ 
+     if (err != C2_OK) {
+         ALOGE("outputFrame: failed to fetch graphic block %d x %d (%x) err = %d",
+-              mFrame->width, mFrame->height, HAL_PIXEL_FORMAT_YV12, err);
++              mFrame->width, mFrame->height, HAL_PIXEL_FORMAT_YCBCR_420_888, err);
+         return C2_CORRUPTED;
+     }
+ 
+diff --git a/C2FFMPEGVideoDecodeInterface.cpp b/C2FFMPEGVideoDecodeInterface.cpp
+index 0809261..f64613b 100644
+--- a/C2FFMPEGVideoDecodeInterface.cpp
++++ b/C2FFMPEGVideoDecodeInterface.cpp
+@@ -235,7 +235,7 @@ C2FFMPEGVideoDecodeInterface::C2FFMPEGVideoDecodeInterface(
+     addParameter(
+             DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
+             .withConstValue(new C2StreamPixelFormatInfo::output(
+-                                 0u, HAL_PIXEL_FORMAT_YV12))
++                                 0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
+             .build());
+ 
+     addParameter(
+diff --git a/ffmpeg_utils/ffmpeg_hwaccel.c b/ffmpeg_utils/ffmpeg_hwaccel.c
+index 531a454..baea852 100644
+--- a/ffmpeg_utils/ffmpeg_hwaccel.c
++++ b/ffmpeg_utils/ffmpeg_hwaccel.c
+@@ -7,7 +7,20 @@
+ #include "libavutil/opt.h"
+ 
+ int ffmpeg_hwaccel_init(AVCodecContext *avctx) {
+-    if (avctx->codec_id != AV_CODEC_ID_HEVC || !property_get_bool("persist.vendor.ffmpeg_codec2.v4l2.h265", 0))
++    switch (avctx->codec_id) {
++        case AV_CODEC_ID_AV1:
++        case AV_CODEC_ID_H264:
++        case AV_CODEC_ID_HEVC:
++        case AV_CODEC_ID_MPEG2VIDEO:
++        case AV_CODEC_ID_VP8:
++        case AV_CODEC_ID_VP9:
++            break;
++        default:
++            return 0;
++    }
++    // Hardware decoding (V4L2 Request API) unless disabled; FFmpeg falls back to software
++    // decoding for streams the hardware can't handle.
++    if (!property_get_bool("persist.vendor.ffmpeg_codec2.hwaccel", 1))
+         return 0;
+ 
+     // Find codec information. At this point, AVCodecContext.codec may not be
+@@ -55,46 +68,8 @@ int ffmpeg_hwaccel_init(AVCodecContext *avctx) {
+ void ffmpeg_hwaccel_deinit(AVCodecContext *avctx __unused) {
+ }
+ 
+-int ffmpeg_hwaccel_get_frame(AVCodecContext *avctx, AVFrame *frame) {
+-    if (!frame->hw_frames_ctx) {
+-        // Frame is not hw-accel
+-        return 0;
+-    }
+-
+-    AVFrame* output;
+-    int err;
+-
+-    output = av_frame_alloc();
+-    if (!output) {
+-        return AVERROR(ENOMEM);
+-    }
+-
+-    output->format = AV_PIX_FMT_YUV420P;
+-    if (avctx->profile == AV_PROFILE_HEVC_MAIN_10) {
+-        output->format = AV_PIX_FMT_NV12;
+-    }
+-
+-    err = av_hwframe_transfer_data(output, frame, 0);
+-    if (err < 0) {
+-        ALOGE("ffmpeg_hwaccel_get_frame failed to transfer data: %s (%08x)",
+-              av_err2str(err), err);
+-        goto fail;
+-    }
+-
+-    err = av_frame_copy_props(output, frame);
+-    if (err < 0) {
+-        ALOGE("ffmpeg_hwaccel_get_frame failed to copy frame properties: %s (%08x)",
+-              av_err2str(err), err);
+-        goto fail;
+-    }
+-
+-    av_frame_unref(frame);
+-    av_frame_move_ref(frame, output);
+-    av_frame_free(&output);
+-
++int ffmpeg_hwaccel_get_frame(AVCodecContext *avctx __unused, AVFrame *frame __unused) {
++    // Hardware frames are kept as they are: the component maps them when it copies
++    // the picture into the output buffer, which saves an intermediate copy.
+     return 0;
+-
+-fail:
+-    av_frame_free(&output);
+-    return err;
+ }
+diff --git a/ffmpeg_utils/ffmpeg_utils.h b/ffmpeg_utils/ffmpeg_utils.h
+index be67aac..83b198b 100644
+--- a/ffmpeg_utils/ffmpeg_utils.h
++++ b/ffmpeg_utils/ffmpeg_utils.h
+@@ -28,6 +28,8 @@ extern "C" {
+ #include "libswresample/swresample.h"
+ #include "libavutil/opt.h"
+ #include "libavutil/pixdesc.h"
++#include "libavutil/hwcontext.h"
++#include "libavutil/imgutils.h"
+ 
+ }
+ 
+-- 
+2.55.0
+

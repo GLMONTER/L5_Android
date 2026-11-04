@@ -1,0 +1,194 @@
+From 56c039af91ff2b9fccfba5f57dd393793fe3b5c8 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 20:55:24 -0600
+Subject: [PATCH] ipa: simple: af: Refocus with a local scan
+
+When the contrast drops in continuous mode, search around the current
+lens position instead of restarting the full scan from infinity: step
+towards higher lens positions when there is room (lower otherwise), and
+reverse if the first step loses contrast. A local scan stops two steps
+past the best position, or one step if the contrast has fallen below 85%
+of the best. A flat contrast curve falls back to the full scan.
+---
+ src/ipa/softisp/algorithms/af.cpp | 100 +++++++++++++++++++++++++++++-
+ src/ipa/softisp/algorithms/af.h   |   7 +++
+ 2 files changed, 104 insertions(+), 3 deletions(-)
+
+diff --git a/src/ipa/softisp/algorithms/af.cpp b/src/ipa/softisp/algorithms/af.cpp
+index 7670fa2..1821c28 100644
+--- a/src/ipa/softisp/algorithms/af.cpp
++++ b/src/ipa/softisp/algorithms/af.cpp
+@@ -47,6 +47,12 @@ namespace ipa::softisp::algorithms {
+  *   changes by more than a threshold and the scene is steady again. AfPause
+  *   suspends it, at once or after the current scan.
+  *
++ * Rescans in continuous mode are local: they climb the contrast from the
++ * focused position, towards macro first and the other way if that loses
++ * contrast, and stop one or two steps past the peak. Small changes of the
++ * subject distance refocus in a few steps instead of a scan from infinity.
++ * A local scan that sees no clear peak falls back to a full scan.
++ *
+  * Tuning parameters, all optional, as lens driver codes unless noted:
+  * - range: [min, max] codes to scan, the lens control range by default
+  * - infinity, macro: codes that focus at infinity and at maxDioptres, for
+@@ -166,11 +172,95 @@ void Af::startScan(IPAContext &context)
+ 	afterBest_.reset();
+ 	prevContrast_.reset();
+ 	stepsPastBest_ = 0;
++	localScan_ = false;
++	direction_ = 1;
+ 	moveLens(context, scanPos_);
+ 
+ 	LOG(IPASoftAf, Debug) << "Scan started";
+ }
+ 
++void Af::startLocalScan(IPAContext &context, double contrast)
++{
++	/* The current position, measured in the changed scene, is the first sample */
++	scanning_ = true;
++	localScan_ = true;
++	reversed_ = false;
++	state_ = controls::AfStateScanning;
++	origin_ = lensPosition_;
++	bestPos_ = origin_;
++	bestContrast_ = contrast;
++	minContrast_ = contrast;
++	beforeBest_.reset();
++	afterBest_.reset();
++	prevContrast_ = contrast;
++	stepsPastBest_ = 0;
++
++	/* Towards macro first, unless that leaves the range */
++	direction_ = origin_ + step_ <= rangeMax_ ? 1 : -1;
++	scanPos_ = std::clamp(origin_ + direction_ * step_, rangeMin_, rangeMax_);
++	moveLens(context, scanPos_);
++
++	LOG(IPASoftAf, Debug) << "Local scan from " << origin_;
++}
++
++void Af::localScanStep(IPAContext &context, double contrast)
++{
++	LOG(IPASoftAf, Debug) << "Lens " << scanPos_ << " contrast " << contrast;
++
++	minContrast_ = std::min(minContrast_, contrast);
++
++	/* The first step lost contrast: climb the other way from the origin */
++	if (!reversed_ && scanPos_ == origin_ + direction_ * step_ &&
++	    contrast <= bestContrast_) {
++		reversed_ = true;
++		direction_ = -direction_;
++		const int32_t next = origin_ + direction_ * step_;
++		if (next >= rangeMin_ && next <= rangeMax_) {
++			/* Seen from the new direction, this sample comes before the origin */
++			beforeBest_ = contrast;
++			prevContrast_ = bestContrast_;
++			scanPos_ = next;
++			moveLens(context, scanPos_);
++			return;
++		}
++		/* The origin is at the end of the range: it is the peak */
++		afterBest_ = contrast;
++		finishScan(context, true);
++		return;
++	}
++
++	if (contrast > bestContrast_) {
++		beforeBest_ = prevContrast_;
++		afterBest_.reset();
++		bestContrast_ = contrast;
++		bestPos_ = scanPos_;
++		stepsPastBest_ = 0;
++	} else {
++		if (stepsPastBest_ == 0)
++			afterBest_ = contrast;
++		stepsPastBest_++;
++	}
++	prevContrast_ = contrast;
++
++	const int32_t next = scanPos_ + direction_ * step_;
++	const bool pastPeak = stepsPastBest_ >= 2 ||
++			      (stepsPastBest_ == 1 && contrast < bestContrast_ * 0.85);
++	if (!pastPeak && next >= rangeMin_ && next <= rangeMax_) {
++		scanPos_ = next;
++		moveLens(context, scanPos_);
++		return;
++	}
++
++	/* A flat contrast curve: the scene changed too much, search the whole range */
++	if (bestContrast_ <= minContrast_ * minPeakRatio_) {
++		LOG(IPASoftAf, Debug) << "No peak near " << origin_ << ", full scan";
++		startScan(context);
++		return;
++	}
++
++	finishScan(context, true);
++}
++
+ void Af::finishScan(IPAContext &context, bool success)
+ {
+ 	int32_t target = bestPos_;
+@@ -181,11 +271,13 @@ void Af::finishScan(IPAContext &context, bool success)
+ 		double denominator = a - 2 * b + c;
+ 		if (denominator < 0) {
+ 			double offset = 0.5 * (a - c) / denominator;
+-			target += static_cast<int32_t>(std::lround(offset * step_));
++			target += static_cast<int32_t>(std::lround(offset * step_ * direction_));
+ 		}
+ 	}
+ 
+ 	scanning_ = false;
++	localScan_ = false;
++	direction_ = 1;
+ 	state_ = success ? controls::AfStateFocused : controls::AfStateFailed;
+ 	focusedContrast_ = bestContrast_;
+ 	lastContrast_.reset();
+@@ -266,7 +358,7 @@ void Af::monitor(IPAContext &context, double contrast)
+ 		LOG(IPASoftAf, Debug)
+ 			<< "Contrast changed from " << focusedContrast_
+ 			<< " to " << contrast << ", rescanning";
+-		startScan(context);
++		startLocalScan(context, contrast);
+ 	}
+ }
+ 
+@@ -354,7 +446,9 @@ void Af::process(IPAContext &context, const uint32_t frame,
+ 		double contrast = static_cast<double>(stats->afSharpness) /
+ 				  stats->afSamples / std::max(mean * mean, 1.0);
+ 
+-		if (scanning_)
++		if (scanning_ && localScan_)
++			localScanStep(context, contrast);
++		else if (scanning_)
+ 			scanStep(context, frame, contrast);
+ 		else if (mode_ == controls::AfModeContinuous &&
+ 			 pauseState_ == controls::AfPauseStateRunning &&
+diff --git a/src/ipa/softisp/algorithms/af.h b/src/ipa/softisp/algorithms/af.h
+index 4f0df13..1bd1683 100644
+--- a/src/ipa/softisp/algorithms/af.h
++++ b/src/ipa/softisp/algorithms/af.h
+@@ -34,8 +34,10 @@ public:
+ 
+ private:
+ 	void startScan(IPAContext &context);
++	void startLocalScan(IPAContext &context, double contrast);
+ 	void finishScan(IPAContext &context, bool success);
+ 	void scanStep(IPAContext &context, uint32_t frame, double contrast);
++	void localScanStep(IPAContext &context, double contrast);
+ 	void monitor(IPAContext &context, double contrast);
+ 	void moveLens(IPAContext &context, int32_t position);
+ 
+@@ -74,6 +76,11 @@ private:
+ 	std::optional<double> prevContrast_;
+ 	unsigned int stepsPastBest_ = 0;
+ 	std::optional<uint32_t> movedAt_;
++	/* Local scan (continuous mode): hill climb from the focused position */
++	bool localScan_ = false;
++	bool reversed_ = false;
++	int32_t origin_ = 0;
++	int32_t direction_ = 1;
+ 
+ 	/* Continuous mode */
+ 	double focusedContrast_ = 0.0;
+-- 
+2.55.0
+

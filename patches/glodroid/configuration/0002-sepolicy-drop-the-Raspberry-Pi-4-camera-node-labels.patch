@@ -1,0 +1,34 @@
+From 5ba2e4366b48aba4d677ed1b4cba775e62e73c56 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 19:34:20 -0600
+Subject: [PATCH] sepolicy: drop the Raspberry Pi 4 camera node labels
+
+Fixed /dev/video0, /dev/video13-16 and /dev/media1-2 camera_device labels
+match whatever happens to probe at those numbers on other boards. On the
+Librem 5 the Hantro VPUs and the CSI cameras enumerate in either order,
+so the VPU nodes could end up camera_device and become unusable by the
+Codec2 HAL (mediacodec). The generic /dev/video* label (video_device) is
+usable by hal_camera as well.
+---
+ common/base/sepolicy/vendor/file_contexts | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/common/base/sepolicy/vendor/file_contexts b/common/base/sepolicy/vendor/file_contexts
+index 5d8c2ef..5d3736d 100644
+--- a/common/base/sepolicy/vendor/file_contexts
++++ b/common/base/sepolicy/vendor/file_contexts
+@@ -8,11 +8,3 @@
+ /dev/block/platform/soc@0/emmc2bus/fe340000\.mmc/by-name/boot(_[ab])?           u:object_r:boot_block_device:s0
+ /dev/block/platform/soc@0/emmc2bus/fe340000\.mmc/by-name/dtbo(_[ab])?           u:object_r:boot_block_device:s0
+ 
+-# RPI4 camera and ISP
+-/dev/video0                                                                     u:object_r:camera_device:s0
+-/dev/video13                                                                    u:object_r:camera_device:s0
+-/dev/video14                                                                    u:object_r:camera_device:s0
+-/dev/video15                                                                    u:object_r:camera_device:s0
+-/dev/video16                                                                    u:object_r:camera_device:s0
+-/dev/media1                                                                     u:object_r:camera_device:s0
+-/dev/media2                                                                     u:object_r:camera_device:s0
+-- 
+2.55.0
+

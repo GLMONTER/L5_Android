@@ -1,0 +1,102 @@
+From 6fa8dd24c58ae7c90c6d9dce65d11c4caba9c5c9 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 16:35:31 -0600
+Subject: [PATCH] ffmpeg: V4L2 Request API without libudev; ffmpeg_codec2: AIDL
+ service
+
+FFmpeg: Android has no libudev, so build the V4L2 Request API hwaccels
+with libdrm only (needs an FFmpeg that finds media devices without it),
+and drop --disable-postproc, which FFmpeg 8 no longer knows (libpostproc
+was removed) and makes configure fail.
+
+ffmpeg_codec2: build the AIDL Codec2 service (IComponentStore/ffmpeg) of
+current ffmpeg_codec2 trees; Android 17 has no HIDL Codec2 HAL.
+---
+ ffmpeg.mk             |  9 +++++----
+ meson_ffmpegcodec2.mk | 23 ++++++++++++-----------
+ 2 files changed, 17 insertions(+), 15 deletions(-)
+
+diff --git a/ffmpeg.mk b/ffmpeg.mk
+index 2d93c6b..1bd6639 100644
+--- a/ffmpeg.mk
++++ b/ffmpeg.mk
+@@ -18,7 +18,6 @@ FFMPEG_DEFINITIONS := \
+     --disable-static \
+     --enable-shared \
+     --disable-avdevice \
+-    --disable-postproc \
+     --disable-avfilter \
+     $(BOARD_FFMPEG_EXTRA_CONFIGURE_OPTIONS)
+ 
+@@ -43,10 +42,12 @@ AOSPEXT_GEN_PKGCONFIGS += dav1d:$(DAV1D_VERSION)
+ FFMPEG_DEFINITIONS += --enable-libdav1d
+ endif
+ 
++# V4L2 Request API (stateless decoders): FFmpeg finds the media devices without libudev,
++# which Android doesn't have
+ ifneq ($(filter true, $(BOARD_FFMPEG_ENABLE_REQUEST_API)),)
+-LOCAL_SHARED_LIBRARIES += libdrm libudev
+-AOSPEXT_GEN_PKGCONFIGS += libdrm libudev
+-FFMPEG_DEFINITIONS += --enable-libdrm --enable-libudev --enable-v4l2-request
++LOCAL_SHARED_LIBRARIES += libdrm
++AOSPEXT_GEN_PKGCONFIGS += libdrm
++FFMPEG_DEFINITIONS += --enable-libdrm --enable-v4l2-request
+ LOCAL_C_INCLUDES := $(BOARD_FFMPEG_KERNEL_HEADERS_DIR)
+ endif
+ 
+diff --git a/meson_ffmpegcodec2.mk b/meson_ffmpegcodec2.mk
+index fa44806..6a3288f 100644
+--- a/meson_ffmpegcodec2.mk
++++ b/meson_ffmpegcodec2.mk
+@@ -13,36 +13,37 @@ include $(LOCAL_PATH)/aospext_cleanup.mk
+ AOSPEXT_PROJECT_NAME := FFMPEGCODEC2
+ AOSPEXT_BUILD_SYSTEM := meson
+ 
++# The AIDL Codec2 service (android.hardware.media.c2 IComponentStore/ffmpeg)
+ LOCAL_SHARED_LIBRARIES := \
+-    android.hardware.media.c2@1.2 \
++    android.hardware.media.c2-V1-ndk \
+     libavcodec \
+-    libavutil \
+     libavformat \
+     libavservices_minijail \
++    libavutil \
+     libbase \
+-    libbinder \
+-    libcodec2_hidl@1.2 \
++    libbinder_ndk \
++    libcodec2_aidl \
++    libcodec2_hal_common \
+     libcodec2_soft_common \
+     libcodec2_vndk \
+-    libhidlbase \
++    libcutils \
+     liblog \
+     libstagefright_foundation \
+     libswresample \
+     libswscale \
+     libutils \
+-    libcutils \
+ 
+-AOSPEXT_GEN_PKGCONFIGS := cutils drm hardware hidlbase log sync ui utils
++AOSPEXT_GEN_PKGCONFIGS :=
+ 
+ MESON_BUILD_ARGUMENTS := \
+ 
+ # Format: TYPE:REL_PATH_TO_INSTALL_ARTIFACT:VENDOR_SUBDIR:MODULE_NAME:SYMLINK_SUFFIX
+ # TYPE one of: lib, bin, etc
+ AOSPEXT_GEN_TARGETS := \
+-    bin:hw/android.hardware.media.c2@1.2-service-ffmpeg:hw:android.hardware.media.c2@1.2-service-ffmpeg: \
+-    etc:init/android.hardware.media.c2@1.2-service-ffmpeg.rc:init:android.hardware.media.c2@1.2-service-ffmpeg.rc: \
+-    etc:vintf/manifest/android.hardware.media.c2@1.2-service-ffmpeg.xml:vintf/manifest:android.hardware.media.c2@1.2-service-ffmpeg.xml: \
+-    etc:media_codecs_ffmpeg_c2.xml::media_codecs_ffmpeg_c2.xml: \
++    bin:hw/android.hardware.media.c2-service-ffmpeg:hw:android.hardware.media.c2-service-ffmpeg: \
++    etc:init/android.hardware.media.c2-service-ffmpeg.rc:init:android.hardware.media.c2-service-ffmpeg.rc: \
++    etc:vintf/manifest/android.hardware.media.c2-service-ffmpeg.xml:vintf/manifest:android.hardware.media.c2-service-ffmpeg.xml: \
++    etc:seccomp_policy/android.hardware.media.c2-ffmpeg-extended-seccomp_policy:seccomp_policy:android.hardware.media.c2-ffmpeg-extended-seccomp_policy: \
+     $(BOARD_FFMPEGCODEC2_EXTRA_TARGETS)
+ 
+ # HWC3
+-- 
+2.55.0
+

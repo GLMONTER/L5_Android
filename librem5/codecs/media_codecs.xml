@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Hardware video decoders: the i.MX8MQ's Hantro G1 (H.264, VP8, MPEG-2) and G2 (HEVC, VP9),
+  V4L2 stateless decoders driven by FFmpeg's V4L2 Request API hwaccels in the FFmpeg Codec2
+  service (glodroid/vendor/ffmpeg_codec2). FFmpeg decodes in software what the hardware can't
+  (e.g. H.264 High 10). Rank 0x100 puts them ahead of Android's software codecs (0x200), which
+  stay available, and are used for everything else (audio, encoders).
+-->
+<MediaCodecs>
+    <Decoders>
+        <MediaCodec name="c2.ffmpeg.h264.decoder" type="video/avc" rank="256">
+            <Limit name="size" min="48x48" max="1920x1088" />
+            <Limit name="alignment" value="2x2" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.vp8.decoder" type="video/x-vnd.on2.vp8" rank="256">
+            <Limit name="size" min="48x48" max="1920x1088" />
+            <Limit name="alignment" value="2x2" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.mpeg2.decoder" type="video/mpeg2" rank="256">
+            <Limit name="size" min="48x48" max="1920x1088" />
+            <Limit name="alignment" value="2x2" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.hevc.decoder" type="video/hevc" rank="256">
+            <Limit name="size" min="48x48" max="4096x2304" />
+            <Limit name="alignment" value="2x2" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+        <MediaCodec name="c2.ffmpeg.vp9.decoder" type="video/x-vnd.on2.vp9" rank="256">
+            <Limit name="size" min="48x48" max="4096x2304" />
+            <Limit name="alignment" value="2x2" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+    </Decoders>
+</MediaCodecs>

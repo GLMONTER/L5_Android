@@ -1,0 +1,36 @@
+From 7aa6e0cac9d7a7466e5aea47b8b182f3e8550aaf Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 20:51:25 -0600
+Subject: [PATCH 13/13] media: verisilicon: allow cache hints on decoder
+ capture queues
+
+Userspace that reads decoded frames back with the CPU (e.g. FFmpeg's V4L2
+request hwaccel copying into a display buffer) gets coherent, uncached
+buffers by default, and the read-back of a 1080p30 stream then takes most
+of a Cortex-A53 core on i.MX8MQ. Set allow_cache_hints on decoder capture
+queues so V4L2_MEMORY_FLAG_NON_COHERENT can request cacheable buffers;
+vb2-dma-contig syncs the caches on QBUF and DQBUF.
+---
+ drivers/media/platform/verisilicon/hantro_drv.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/media/platform/verisilicon/hantro_drv.c b/drivers/media/platform/verisilicon/hantro_drv.c
+index 418cfe3a1..1108528fb 100644
+--- a/drivers/media/platform/verisilicon/hantro_drv.c
++++ b/drivers/media/platform/verisilicon/hantro_drv.c
+@@ -238,6 +238,12 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
+ 	if (!ctx->is_encoder) {
+ 		dst_vq->dma_attrs |= DMA_ATTR_NO_KERNEL_MAPPING;
+ 		dst_vq->max_num_buffers = MAX_POSTPROC_BUFFERS;
++		/*
++		 * Decoded frames are only written by the hardware. Let userspace
++		 * ask for cacheable (non-coherent) buffers when it reads them back
++		 * with the CPU; vb2 does the cache maintenance on QBUF/DQBUF.
++		 */
++		dst_vq->allow_cache_hints = 1;
+ 	}
+ 
+ 	dst_vq->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+-- 
+2.55.0
+

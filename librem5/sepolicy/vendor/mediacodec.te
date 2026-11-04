@@ -1,0 +1,4 @@
+# FFmpeg Codec2 service (hardware video decoders): maps the gralloc output buffers in-process
+# through the stable-C minigbm mapper, which opens the GPU render node (gbm_mesa)
+allow mediacodec hal_graphics_mapper_service:service_manager find;
+allow mediacodec dri_device:dir r_dir_perms;

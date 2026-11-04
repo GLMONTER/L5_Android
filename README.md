@@ -19,7 +19,8 @@ patches and config, and the scripts to build and flash. Nothing else is modified
 | Flashlight (7 brightness levels) | LM3560 flash LED as the rear camera's torch |
 | Hardware kill switches | mic/camera switch -> Android's hardware privacy toggles; Wi-Fi/BT and modem switches recover on release |
 | GPS (GPS + GLONASS) | ST Teseo receiver on UART2, NMEA GNSS HAL in `librem5/gnss` |
-| Video playback (H.264, HEVC, VP8, VP9, AV1), camera video recording (720p H.264 + AAC) | Android's software codecs; 1080p30 H.264 plays in real time |
+| Hardware video decoding: H.264, VP8, MPEG-2 (Hantro G1), HEVC, VP9 (G2); 1080p30 without dropped frames at ~25% of one core | FFmpeg's V4L2 Request API hwaccels (Kwiboo's series) in raspberry-vanilla's FFmpeg Codec2 service, both built with aospext; see below |
+| Video playback of other formats (e.g. AV1), camera video recording (720p H.264 + AAC) | Android's software codecs |
 | SELinux enforcing | device policy in `librem5/sepolicy`; `SELINUX_MODE=permissive scripts/build.sh` to debug |
 | Battery/charging, buttons, vibration | |
 | USB: adb, file transfer (MTP/PTP), USB tethering, host mode (flash drives) | USB-C roles switch automatically (TPS6598x); kernel patch 0011 |
@@ -28,8 +29,8 @@ patches and config, and the scripts to build and flash. Nothing else is modified
 | Earpiece | WM8962 SPKOUTR (Purism UCM "Handset1") |
 
 Not yet: calls, SMS and mobile data (implemented but untested: no SIM yet), call audio (modem
-PCM <-> codec), headphone jack (detection enabled, untested), hardware video decoding (Hantro
-G1/G2: no V4L2 stateless Codec2 component yet; the SoC has no video encoder), HDMI.
+PCM <-> codec), headphone jack (detection enabled, untested), hardware video encoding (the SoC
+has none), HDMI.
 
 Known gaps: `scripts/setup.sh` has not been run end to end on a fresh machine yet (everything
 after it has); the build depends on Purism, GloDroid, freedesktop and Debian keeping the
@@ -126,7 +127,12 @@ Hardware quirks found during bring-up (details in commit messages and file comme
   The software ISP outputs one stream, so the HAL derives the others from it. Contrast AF drives
   the DW9714 voice coil; tuning (black level, colour matrix from Purism's Millipixels data,
   AF range) is in `librem5/camera/*.yaml`. Kernel patches fix the HI846 pixel rate and the
-  camera rail start-up delay.
+  camera rail start-up delay. libcamera patches compute the statistics every second frame
+  (AGC/AWB/AF react twice as fast) and refocus with a local search around the current lens
+  position instead of a full sweep from infinity. Frames whose raw capture failed reach the HAL
+  without a sensor timestamp; Android never retires a request with a zero shutter timestamp, so
+  closing the camera timed out ("Error waiting for HAL to drain") and left it in an error state.
+  The HAL now reports such requests as failed.
 - Android 17's flashlight tile only turns on a torch that has strength levels.
 - GNSS: the DT calls the receiver "globaltop,pa6h" (kernel gnss-mtk, 9600 baud) but it is an ST
   Teseo (`$PSTM` sentences; GPS + GLONASS, two GNGSA per epoch without system ids). AOSP's
@@ -142,6 +148,22 @@ Hardware quirks found during bring-up (details in commit messages and file comme
   sensors HAL calibrates it online from each axis' range (turn the phone through all
   orientations once) and keeps the offset in `/data/vendor/sensors` across reboots; calibrated,
   it reads Earth's ~50 uT.
+- Hardware video decoding: the Hantro G1/G2 are V4L2 *stateless* decoders, which AOSP's
+  `v4l2_codec2` does not support. FFmpeg (`glodroid/vendor/ffmpeg`, master + Kwiboo's
+  v4l2request series, `patches/glodroid/vendor/ffmpeg`) drives them, and raspberry-vanilla's
+  FFmpeg Codec2 service (`glodroid/vendor/ffmpeg_codec2`) runs in /vendor as
+  `IComponentStore/default`, copying each decoded frame into the display buffer
+  (`librem5/codecs/media_codecs.xml` ranks it ahead of the software codecs). Pitfalls:
+  - With `ro.vendor.api_level` below 202404 the framework uses the HIDL Codec2 HAL unless
+    `media.c2.hal.selection=aidl`, and then never lists an AIDL store.
+  - Android has no libudev: FFmpeg finds the decoders by probing `/dev/mediaN` and
+    `/dev/videoN` (listing `/dev` is denied to the codec service).
+  - The VPU and camera nodes enumerate in either order; GloDroid's common sepolicy labelled
+    fixed Raspberry Pi camera node numbers camera_device (dropped, `patches/glodroid/configuration`).
+  - The copy out of coherent (uncached) VPU buffers took ~85% of a core. FFmpeg asks for
+    cacheable buffers (`V4L2_MEMORY_FLAG_NON_COHERENT`); kernel patches let Hantro accept the
+    hint and fix vb2-dma-contig failing that allocation for queues with
+    `DMA_ATTR_NO_KERNEL_MAPPING`.
 - Video: the software codec service's seccomp policy lacks syscalls Mesa makes when minigbm
   maps a frame (`librem5/codecs/mediaswcodec.policy`), and encoders fed from a Surface need
   `debug.stagefright.c2inputsurface=-1`. Recording stops at 720p: at 1080p the software encoder
@@ -187,6 +209,6 @@ Hardware quirks found during bring-up (details in commit messages and file comme
 
 Apache-2.0 (see `LICENSE`), like AOSP and GloDroid device trees. Exceptions: `kernel/patches/`
 and `boot/u-boot/` are GPL-2.0 (Linux kernel, u-boot); `patches/glodroid/vendor/libcamera/` are
-LGPL-2.1-or-later (libcamera); `librem5/patches-minigbm/` are
+LGPL-2.1-or-later (libcamera); `patches/glodroid/vendor/ffmpeg/` are LGPL-2.1-or-later (FFmpeg); `librem5/patches-minigbm/` are
 GloDroid's minigbm patches under minigbm's BSD-style license; files copied from AOSP keep
 their original Apache-2.0 headers. Broadcom firmware is not included.

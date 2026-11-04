@@ -48,6 +48,15 @@ BOARD_VENDOR_SEPOLICY_DIRS += $(BC_PATH)/sepolicy/vendor
 # camera provider, which FCM 8 no longer allows.
 BOARD_BUILD_AOSPEXT_LIBCAMERA := true
 BOARD_LIBCAMERA_SRC_DIR := glodroid/vendor/libcamera
+
+# Hardware video decoding: FFmpeg with the V4L2 Request API hwaccels (Hantro G1/G2) and the
+# FFmpeg Codec2 service, both built by aospext (GD_NO_DEFAULT_CODECS skips GloDroid's codec setup)
+BOARD_BUILD_AOSPEXT_FFMPEG := true
+BOARD_FFMPEG_SRC_DIR := glodroid/vendor/ffmpeg
+BOARD_FFMPEG_ENABLE_REQUEST_API := true
+BOARD_FFMPEG_EXTRA_CONFIGURE_OPTIONS := --disable-programs --disable-doc --disable-encoders --disable-muxers
+BOARD_BUILD_AOSPEXT_FFMPEGCODEC2 := true
+BOARD_FFMPEGCODEC2_SRC_DIR := glodroid/vendor/ffmpeg_codec2
 BOARD_LIBCAMERA_PIPELINES := simple
 BOARD_LIBCAMERA_IPAS := softisp
 BOARD_LIBCAMERA_EXTRA_MESON_ARGS := \

@@ -1,0 +1,31 @@
+From dabbfdcbed55e4cc6e900ef52f2255fca2717fbb Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 20:55:24 -0600
+Subject: [PATCH 22/23] libcamera: software_isp: Compute statistics every
+ second frame
+
+Statistics on every fourth frame make AGC, AWB and autofocus react in
+steps of four frames, which is slow for contrast-detect autofocus that
+needs a fresh measurement after each lens move. Computing them every
+second frame halves that latency; the CPU cost of the statistics pass is
+small compared to debayering.
+---
+ include/libcamera/internal/software_isp/swstats_cpu.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/libcamera/internal/software_isp/swstats_cpu.h b/include/libcamera/internal/software_isp/swstats_cpu.h
+index 5c81418..9f9d14f 100644
+--- a/include/libcamera/internal/software_isp/swstats_cpu.h
++++ b/include/libcamera/internal/software_isp/swstats_cpu.h
+@@ -44,7 +44,7 @@ public:
+ 	 * Run stats once every 4 frames to ensure any previous
+ 	 * exposure changes have been applied.
+ 	 */
+-	static constexpr uint32_t kStatPerNumFrames = 4;
++	static constexpr uint32_t kStatPerNumFrames = 2;
+ 
+ 	bool isValid() const { return sharedStats_.fd().isValid(); }
+ 
+-- 
+2.55.0
+

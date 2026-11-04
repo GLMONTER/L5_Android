@@ -1,0 +1,162 @@
+From 3e12c705c8c74fc963f0333f2c2f28189a0fa22c Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 16:36:26 -0600
+Subject: [PATCH] Remove the Soong build and APEX packaging
+
+This tree is built by meson (GloDroid's aospext), whose FFmpeg libraries
+are Make modules: Soong parses every Android.bp and fails on modules that
+depend on them, even ones that are never installed.
+---
+ Android.bp              | 83 -----------------------------------------
+ apex_file_contexts      |  3 --
+ apex_manifest.json      |  4 --
+ ffmpeg_utils/Android.bp | 26 -------------
+ 4 files changed, 116 deletions(-)
+ delete mode 100644 Android.bp
+ delete mode 100644 apex_file_contexts
+ delete mode 100644 apex_manifest.json
+ delete mode 100644 ffmpeg_utils/Android.bp
+
+diff --git a/Android.bp b/Android.bp
+deleted file mode 100644
+index 8f77c8e..0000000
+--- a/Android.bp
++++ /dev/null
+@@ -1,83 +0,0 @@
+-// Copyright (C) 2022 Michael Goffioul <michael.goffioul@gmail.com>
+-// Copyright (C) 2025 KonstaKANG
+-//
+-// SPDX-License-Identifier: Apache-2.0
+-
+-cc_binary {
+-    name: "android.hardware.media.c2-service-ffmpeg",
+-    relative_install_path: "hw",
+-    vendor: true,
+-    srcs: [
+-        "C2FFMPEGAudioDecodeComponent.cpp",
+-        "C2FFMPEGAudioDecodeInterface.cpp",
+-        "C2FFMPEGComponentInterface.cpp",
+-        "C2FFMPEGComponentStore.cpp",
+-        "C2FFMPEGVideoDecodeComponent.cpp",
+-        "C2FFMPEGVideoDecodeInterface.cpp",
+-        "main.cpp",
+-    ],
+-    shared_libs: [
+-        "android.hardware.media.c2-V1-ndk",
+-        "libavcodec",
+-        "libavservices_minijail",
+-        "libavutil",
+-        "libbase",
+-        "libbinder_ndk",
+-        "libcodec2_aidl",
+-        "libcodec2_hal_common",
+-        "libcodec2_soft_common",
+-        "libcodec2_vndk",
+-        "libffmpeg_utils",
+-        "liblog",
+-        "libstagefright_foundation",
+-        "libswresample",
+-        "libswscale",
+-        "libutils",
+-    ],
+-    installable: false,
+-}
+-
+-prebuilt_etc {
+-    name: "android.hardware.media.c2-ffmpeg-default-seccomp_policy",
+-    src: ":android.hardware.media.c2-default-seccomp_policy",
+-    sub_dir: "seccomp_policy",
+-    installable: false,
+-}
+-
+-prebuilt_etc {
+-    name: "android.hardware.media.c2-ffmpeg-extended-seccomp_policy",
+-    src: "android.hardware.media.c2-ffmpeg-extended-seccomp_policy",
+-    sub_dir: "seccomp_policy",
+-    installable: false,
+-}
+-
+-prebuilt_etc {
+-    name: "android.hardware.media.c2-service-ffmpeg.rc",
+-    src: "android.hardware.media.c2-service-ffmpeg.rc",
+-    installable: false,
+-}
+-
+-prebuilt_etc {
+-    name: "android.hardware.media.c2-service-ffmpeg.xml",
+-    src: "android.hardware.media.c2-service-ffmpeg.xml",
+-    sub_dir: "vintf",
+-    installable: false,
+-}
+-
+-apex {
+-    name: "com.android.hardware.media.c2.ffmpeg",
+-    manifest: "apex_manifest.json",
+-    file_contexts: "apex_file_contexts",
+-    key: "com.android.hardware.key",
+-    certificate: ":com.android.hardware.certificate",
+-    updatable: false,
+-    vendor: true,
+-    binaries: ["android.hardware.media.c2-service-ffmpeg"],
+-
+-    prebuilts: [
+-        "android.hardware.media.c2-ffmpeg-default-seccomp_policy",
+-        "android.hardware.media.c2-ffmpeg-extended-seccomp_policy",
+-        "android.hardware.media.c2-service-ffmpeg.rc",
+-        "android.hardware.media.c2-service-ffmpeg.xml",
+-    ],
+-}
+diff --git a/apex_file_contexts b/apex_file_contexts
+deleted file mode 100644
+index 70d017c..0000000
+--- a/apex_file_contexts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-(/.*)?                                               u:object_r:vendor_file:s0
+-/etc(/.*)?                                           u:object_r:vendor_configs_file:s0
+-/bin/hw/android\.hardware\.media\.c2-service-ffmpeg  u:object_r:mediacodec_exec:s0
+diff --git a/apex_manifest.json b/apex_manifest.json
+deleted file mode 100644
+index 7c52795..0000000
+--- a/apex_manifest.json
++++ /dev/null
+@@ -1,4 +0,0 @@
+-{
+-    "name": "com.android.hardware.media.c2.ffmpeg",
+-    "version": 1
+-}
+diff --git a/ffmpeg_utils/Android.bp b/ffmpeg_utils/Android.bp
+deleted file mode 100644
+index 71787e2..0000000
+--- a/ffmpeg_utils/Android.bp
++++ /dev/null
+@@ -1,26 +0,0 @@
+-// Copyright (C) 2017 The Android-x86 Open Source Project
+-// Copyright (C) 2025 KonstaKANG
+-//
+-// SPDX-License-Identifier: Apache-2.0
+-
+-cc_library_shared {
+-    name: "libffmpeg_utils",
+-    vendor: true,
+-    export_include_dirs: [
+-        ".",
+-    ],
+-    srcs: [
+-        "ffmpeg_hwaccel.c",
+-        "ffmpeg_utils.cpp",
+-    ],
+-    shared_libs: [
+-        "libavcodec",
+-        "libavformat",
+-        "libavutil",
+-        "libcutils",
+-        "liblog",
+-        "libswresample",
+-        "libswscale",
+-        "libutils",
+-    ],
+-}
+-- 
+2.55.0
+

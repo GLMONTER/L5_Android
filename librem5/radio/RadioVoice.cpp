@@ -385,15 +385,21 @@ ScopedAStatus RadioVoice::getCurrentCalls(const int32_t serial) {
         RadioError status = RadioError::NONE;
         std::vector<voice::Call> calls;
 
+        // Librem 5: without a SIM (or with the radio off) the BM818 answers AT+CLCC with a
+        // bare ERROR. There is no call then; report an empty list, since telephony re-polls
+        // a failed GET_CURRENT_CALLS every 250 ms for as long as it keeps failing.
         const AtResponsePtr response =
             mAtConversation(requestPipe, atCmds::getCurrentCalls,
                             [](const AtResponse& response) -> bool {
                                return response.holds<CLCC>() ||
                                       response.isOK() ||
+                                      response.isERROR() ||
                                       response.holds<CmeError>();
                             });
         if (!response || response->isParseError()) {
             status = FAILURE(RadioError::INTERNAL_ERR);
+        } else if (response->isERROR()) {
+            // no calls
         } else if (const CLCC* clcc = response->get_if<CLCC>()) {
             calls = clcc->calls;
         } else if (const CmeError* cmeError = response->get_if<CmeError>()) {

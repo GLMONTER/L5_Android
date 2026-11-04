@@ -52,3 +52,5 @@ genfscon sysfs /devices/platform/soc@0/30800000.bus/30a30000.i2c/i2c-1/1-0053/le
 
 # i.MX SDHC driver bind/unbind: init resets the Wi-Fi/BT SDIO host after the kill switch
 genfscon sysfs /bus/platform/drivers/sdhci-esdhc-imx                                        u:object_r:sysfs_sdio_host:s0
+# USB device controller attributes (the gadget HAL reads current_speed; /sys/class/udc is sysfs_udc)
+genfscon sysfs /devices/platform/soc@0/38100000.usb/udc                         u:object_r:sysfs_udc:s0

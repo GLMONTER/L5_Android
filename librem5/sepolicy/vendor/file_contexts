@@ -39,11 +39,16 @@
 /vendor/bin/hw/android\.hardware\.radio-service\.librem5                      u:object_r:hal_radio_default_exec:s0
 /dev/ttyUSB[0-9]+                                                             u:object_r:radio_device:s0
 # Cameras: AIDL camera provider (libcamera HAL). libcamera opens the media controller, the
-# sensor/CSI/VCM/flash subdevs and the CSI capture nodes. GloDroid labels a few fixed node
-# numbers camera_device (fine: hal_camera may use both); everything else is video_device.
+# sensor/CSI/VCM/flash subdevs and the CSI capture nodes. All media/video nodes are video_device:
+# the VPU and camera nodes enumerate in either order (GloDroid's fixed Raspberry Pi camera_device
+# labels are dropped by patches/glodroid/configuration/0002), and hal_camera may use video_device.
 /vendor/bin/hw/android\.hardware\.camera\.provider-service\.librem5           u:object_r:hal_camera_default_exec:s0
 /dev/media[0-9]+                                                              u:object_r:video_device:s0
 /dev/v4l-subdev[0-9]+                                                         u:object_r:video_device:s0
 /vendor/bin/librem5-hks-monitor                                             u:object_r:hks_monitor_exec:s0
 /vendor/bin/hw/android\.hardware\.gnss-service\.librem5                     u:object_r:hal_gnss_default_exec:s0
 /data/vendor/sensors(/.*)?                                                  u:object_r:sensors_vendor_data_file:s0
+
+# Hardware video decoders: FFmpeg Codec2 service (mediacodec opens /dev/video* and /dev/media*,
+# both video_device)
+/vendor/bin/hw/android\.hardware\.media\.c2-service-ffmpeg                    u:object_r:mediacodec_exec:s0

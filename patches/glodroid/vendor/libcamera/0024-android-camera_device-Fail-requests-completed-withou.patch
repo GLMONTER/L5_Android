@@ -1,0 +1,65 @@
+From 1d72e87683fb74b60a7c10c994b14569b3d0e133 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 21:48:01 -0600
+Subject: [PATCH] android: camera_device: Fail requests completed without a
+ sensor timestamp
+
+The simple pipeline completes the user-facing buffers of a request
+unprocessed when its raw frame fails. Such a request has no
+SensorTimestamp, and the HAL then sends a shutter notification with a
+timestamp of 0. The camera framework accepts it but never retires a
+request whose shutter timestamp is 0: the request stays in flight with
+its buffers, the stream runs out of buffers, and closing the camera
+times out waiting for the HAL to drain, putting the device in an error
+state.
+
+Report requests completed without a sensor timestamp as failed, like
+requests that did not complete successfully.
+---
+ src/android/camera_device.cpp | 24 +++++++++++++++++++++---
+ 1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/src/android/camera_device.cpp b/src/android/camera_device.cpp
+index 47e7e2f..652dc59 100644
+--- a/src/android/camera_device.cpp
++++ b/src/android/camera_device.cpp
+@@ -1439,15 +1439,33 @@ void CameraDevice::requestComplete(Request *request)
+ 		return;
+ 	}
+ 
++	/*
++	 * A request completed without a sensor timestamp carries no captured
++	 * frame (the simple pipeline completes the output buffers unprocessed
++	 * when the raw frame failed). The camera framework never retires a
++	 * request whose shutter timestamp is 0, so such requests would stay in
++	 * flight forever, holding their buffers and failing the next drain.
++	 * Report them as failed instead.
++	 */
++	uint64_t sensorTimestamp = static_cast<uint64_t>(request->metadata()
++								 .get(controls::SensorTimestamp)
++								 .value_or(0));
++	if (!sensorTimestamp) {
++		LOG(HAL, Warning) << "Request " << request->cookie()
++				  << " completed without a sensor timestamp";
++
++		abortRequest(descriptor);
++		completeDescriptor(descriptor);
++
++		return;
++	}
++
+ 	/*
+ 	 * Notify shutter as soon as we have verified we have a valid request.
+ 	 *
+ 	 * \todo The shutter event notification should be sent to the framework
+ 	 * as soon as possible, earlier than request completion time.
+ 	 */
+-	uint64_t sensorTimestamp = static_cast<uint64_t>(request->metadata()
+-								 .get(controls::SensorTimestamp)
+-								 .value_or(0));
+ 	notifyShutter(descriptor->frameNumber_, sensorTimestamp);
+ 
+ 	LOG(HAL, Debug) << "Request " << request->cookie() << " completed with "
+-- 
+2.55.0
+

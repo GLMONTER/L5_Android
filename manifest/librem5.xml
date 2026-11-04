@@ -15,6 +15,8 @@
   <remote name="glodroid" fetch="https://github.com/glodroid/" />
   <remote name="fdo"      fetch="https://gitlab.freedesktop.org/" />
   <remote name="libcamera" fetch="https://git.libcamera.org/" />
+  <remote name="ffmpeg"    fetch="https://github.com/FFmpeg/" />
+  <remote name="rpi-vanilla" fetch="https://github.com/raspberry-vanilla/" />
 
   <!-- GloDroid shared configuration (base dir + configuration subdir; same repo, two revisions) -->
   <project path="glodroid"               remote="glodroid" name="glodroid_configuration.git" revision="refs/tags/basedir-v0.9.0" />
@@ -30,4 +32,10 @@
 
   <!-- Cameras: libcamera (simple pipeline + software ISP for the i.MX8MQ CSI), built by aospext -->
   <project path="glodroid/vendor/libcamera" remote="libcamera" name="libcamera/libcamera.git" revision="refs/tags/v0.8.0" clone-depth="1" />
+
+  <!-- Hardware video decoding (Hantro G1/G2, V4L2 stateless): FFmpeg master plus the V4L2 Request
+       API hwaccels (patches/glodroid/vendor/ffmpeg, from Jonas Karlman's v4l2request-v3 merge
+       request) and the FFmpeg Codec2 service (Raspberry Vanilla's AIDL version), both built by aospext -->
+  <project path="glodroid/vendor/ffmpeg"        remote="ffmpeg"      name="FFmpeg.git"                     revision="86eb07154d0255a5e96c822d8dc7805ade600f0b" />
+  <project path="glodroid/vendor/ffmpeg_codec2" remote="rpi-vanilla" name="android_external_ffmpeg_codec2" revision="1cb7fcee97f3cedd46857f3cd8354777bed307b2" />
 </manifest>

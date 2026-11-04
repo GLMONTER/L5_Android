@@ -1,0 +1,42 @@
+From aa3773d4aaafa46e593f40fe7ca8a44aeb369b7c Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 21:01:36 -0600
+Subject: [PATCH 12/13] media: videobuf2: dma-contig: only pass supported attrs
+ to dma_alloc_noncontiguous
+
+dma_alloc_noncontiguous() fails (with a WARN) for any attribute other
+than DMA_ATTR_ALLOC_SINGLE_PAGES, so a non-coherent MMAP allocation on a
+queue that sets DMA_ATTR_NO_KERNEL_MAPPING (e.g. hantro decoder capture
+queues) always fails with -ENOMEM. The kernel mapping of non-coherent
+buffers is created on demand in vb2_dc_vaddr() anyway; mask the queue
+attributes down to the one the allocator supports.
+---
+ drivers/media/common/videobuf2/videobuf2-dma-contig.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/common/videobuf2/videobuf2-dma-contig.c b/drivers/media/common/videobuf2/videobuf2-dma-contig.c
+index 7123c5fae..4386f21fd 100644
+--- a/drivers/media/common/videobuf2/videobuf2-dma-contig.c
++++ b/drivers/media/common/videobuf2/videobuf2-dma-contig.c
+@@ -211,11 +211,17 @@ static int vb2_dc_alloc_non_coherent(struct vb2_dc_buf *buf)
+ {
+ 	struct vb2_queue *q = buf->vb->vb2_queue;
+ 
++	/*
++	 * dma_alloc_noncontiguous() only accepts DMA_ATTR_ALLOC_SINGLE_PAGES.
++	 * Other queue attributes such as DMA_ATTR_NO_KERNEL_MAPPING do not
++	 * apply: the kernel mapping is created on demand in vb2_dc_vaddr().
++	 */
+ 	buf->dma_sgt = dma_alloc_noncontiguous(buf->dev,
+ 					       buf->size,
+ 					       buf->dma_dir,
+ 					       GFP_KERNEL | q->gfp_flags,
+-					       buf->attrs);
++					       buf->attrs &
++					       DMA_ATTR_ALLOC_SINGLE_PAGES);
+ 	if (!buf->dma_sgt)
+ 		return -ENOMEM;
+ 
+-- 
+2.55.0
+

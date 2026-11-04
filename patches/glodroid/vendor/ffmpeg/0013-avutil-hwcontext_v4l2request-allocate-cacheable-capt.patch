@@ -1,0 +1,63 @@
+From 2d88eb1da48ef6944f63761656c94255a8fa6d00 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 20:51:08 -0600
+Subject: [PATCH] avutil/hwcontext_v4l2request: allocate cacheable capture
+ buffers
+
+Request V4L2_MEMORY_FLAG_NON_COHERENT for capture buffers. Decoded frames
+are read by the CPU when they are mapped or transferred to system memory,
+and with the default coherent (uncached) allocation that copy dominates:
+on i.MX8MQ (Hantro G1) a 1080p30 H.264 stream spent ~85% of a core in
+memmove. vb2 performs the cache maintenance on QBUF/DQBUF, and clears the
+flag for drivers that do not allow cache hints. Fall back to a coherent
+buffer if the non-coherent allocation fails (as it does on kernels where
+vb2-dma-contig passes unsupported attributes to dma_alloc_noncontiguous).
+---
+ libavutil/hwcontext_v4l2request.c | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/libavutil/hwcontext_v4l2request.c b/libavutil/hwcontext_v4l2request.c
+index 66639a0..e02eb9d 100644
+--- a/libavutil/hwcontext_v4l2request.c
++++ b/libavutil/hwcontext_v4l2request.c
+@@ -765,10 +765,23 @@ static AVBufferRef *v4l2request_v4l2_buffer_alloc(AVHWFramesContext *hwfc,
+     struct v4l2_buffer *buffer;
+     uint8_t num_planes;
+     AVBufferRef *ref;
++    int ret;
+ 
+     num_planes = V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
+                  format->fmt.pix_mp.num_planes : 0;
+ 
++#ifdef V4L2_MEMORY_FLAG_NON_COHERENT
++    /*
++     * Ask for cacheable capture buffers. Frames are read back by the CPU when
++     * they are mapped or transferred, and reading uncached memory is many
++     * times slower. vb2 syncs the CPU caches on QBUF/DQBUF, and clears the
++     * flag when the driver does not allow cache hints. Some kernels fail the
++     * non-coherent allocation, so fall back to a coherent buffer.
++     */
++    if (!V4L2_TYPE_IS_OUTPUT(format->type))
++        buffers.flags |= V4L2_MEMORY_FLAG_NON_COHERENT;
++#endif
++
+     ref = av_buffer_allocz(sizeof(struct v4l2_buffer) +
+                            (sizeof(struct v4l2_plane) * num_planes));
+     if (!ref)
+@@ -783,7 +796,12 @@ static AVBufferRef *v4l2request_v4l2_buffer_alloc(AVHWFramesContext *hwfc,
+     }
+ 
+     // Create the buffer
+-    if (ioctl(fctxi->video_fd, VIDIOC_CREATE_BUFS, &buffers) < 0) {
++    ret = ioctl(fctxi->video_fd, VIDIOC_CREATE_BUFS, &buffers);
++    if (ret < 0 && buffers.flags) {
++        buffers.flags = 0;
++        ret = ioctl(fctxi->video_fd, VIDIOC_CREATE_BUFS, &buffers);
++    }
++    if (ret < 0) {
+         av_log(hwfc, AV_LOG_ERROR, "Failed to create buffer of type %d: %s (%d)\n",
+                buffer->type, strerror(errno), errno);
+         goto fail;
+-- 
+2.55.0
+

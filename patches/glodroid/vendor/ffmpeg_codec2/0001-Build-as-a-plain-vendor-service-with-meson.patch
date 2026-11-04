@@ -1,0 +1,142 @@
+From 1fa2caa0082beb33ded58beb97d8661e6489b134 Mon Sep 17 00:00:00 2001
+From: tad <tad.keller@pm.me>
+Date: Tue, 3 Nov 2026 16:34:49 -0600
+Subject: [PATCH 1/2] Build as a plain vendor service with meson
+
+For builds that compile FFmpeg outside Soong (GloDroid's aospext), whose
+libraries Android.bp modules can't link: a meson.build for the service,
+installed in /vendor instead of an APEX, with its init script, VINTF
+fragment and seccomp extension. The service uses AOSP's default Codec2
+seccomp policy from /vendor/etc/seccomp_policy.
+
+The seccomp extension also allows sched_setaffinity and mkdirat: mapping
+gralloc buffers creates a Mesa screen in this process (minigbm gbm_mesa).
+---
+ ...re.media.c2-ffmpeg-extended-seccomp_policy |  4 ++
+ main.cpp                                      | 12 ++++++
+ meson.build                                   | 40 +++++++++++++++++++
+ ...ndroid.hardware.media.c2-service-ffmpeg.rc | 23 +++++++++++
+ 4 files changed, 79 insertions(+)
+ create mode 100644 meson.build
+ create mode 100644 vendor/android.hardware.media.c2-service-ffmpeg.rc
+
+diff --git a/android.hardware.media.c2-ffmpeg-extended-seccomp_policy b/android.hardware.media.c2-ffmpeg-extended-seccomp_policy
+index cb5ba67..8405b7a 100644
+--- a/android.hardware.media.c2-ffmpeg-extended-seccomp_policy
++++ b/android.hardware.media.c2-ffmpeg-extended-seccomp_policy
+@@ -2,3 +2,7 @@
+ eventfd2: 1
+ sched_getaffinity: 1
+ sysinfo: 1
++# Mapping gralloc buffers in this process creates a Mesa screen (minigbm gbm_mesa):
++# its worker threads set their affinity and its shader cache creates directories.
++sched_setaffinity: 1
++mkdirat: 1
+diff --git a/main.cpp b/main.cpp
+index 35a3b04..ae34186 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -27,6 +27,17 @@
+ 
+ using namespace ::aidl::android::hardware::media::c2;
+ 
++#ifdef FFMPEG_CODEC2_VENDOR_INSTALL
++// Installed in /vendor (not as an APEX): AOSP's prebuilt_etc module
++// "android.hardware.media.c2-default-seccomp_policy" plus our extension.
++static constexpr char kBaseSeccompPolicyPath[] =
++        "/vendor/etc/seccomp_policy/"
++        "android.hardware.media.c2-default-seccomp_policy";
++
++static constexpr char kExtSeccompPolicyPath[] =
++        "/vendor/etc/seccomp_policy/"
++        "android.hardware.media.c2-ffmpeg-extended-seccomp_policy";
++#else
+ // This is the absolute on-device path of the prebuilt_etc module
+ // "android.hardware.media.c2-ffmpeg-default-seccomp_policy" in Android.bp.
+ static constexpr char kBaseSeccompPolicyPath[] =
+@@ -37,6 +48,7 @@ static constexpr char kBaseSeccompPolicyPath[] =
+ static constexpr char kExtSeccompPolicyPath[] =
+         "/apex/com.android.hardware.media.c2.ffmpeg/etc/seccomp_policy/"
+         "android.hardware.media.c2-ffmpeg-extended-seccomp_policy";
++#endif
+ 
+ int main() {
+     LOG(DEBUG) << "android.hardware.media.c2-service-ffmpeg starting...";
+diff --git a/meson.build b/meson.build
+new file mode 100644
+index 0000000..462a4bf
+--- /dev/null
++++ b/meson.build
+@@ -0,0 +1,40 @@
++# SPDX-License-Identifier: Apache-2.0
++#
++# Build in /vendor without an APEX, e.g. with GloDroid's aospext (which provides the
++# AOSP and FFmpeg headers and libraries through its compiler wrapper).
++
++project(
++    'ffmpeg_codec2',
++    ['c', 'cpp'],
++    version : '1',
++    license : 'Apache-2.0',
++    meson_version : '>= 0.56',
++    default_options : ['c_std=gnu11', 'cpp_std=gnu++20', 'cpp_rtti=false'],
++)
++
++executable(
++    'android.hardware.media.c2-service-ffmpeg',
++    files(
++        'C2FFMPEGAudioDecodeComponent.cpp',
++        'C2FFMPEGAudioDecodeInterface.cpp',
++        'C2FFMPEGComponentInterface.cpp',
++        'C2FFMPEGComponentStore.cpp',
++        'C2FFMPEGVideoDecodeComponent.cpp',
++        'C2FFMPEGVideoDecodeInterface.cpp',
++        'main.cpp',
++        'ffmpeg_utils/ffmpeg_hwaccel.c',
++        'ffmpeg_utils/ffmpeg_utils.cpp',
++    ),
++    c_args : ['-DFFMPEG_CODEC2_VENDOR_INSTALL'],
++    cpp_args : ['-DFFMPEG_CODEC2_VENDOR_INSTALL', '-Wno-inconsistent-missing-override'],
++    include_directories : include_directories('.', 'ffmpeg_utils'),
++    install : true,
++    install_dir : get_option('bindir') / 'hw',
++)
++
++install_data('vendor/android.hardware.media.c2-service-ffmpeg.rc',
++             install_dir : get_option('sysconfdir') / 'init')
++install_data('android.hardware.media.c2-service-ffmpeg.xml',
++             install_dir : get_option('sysconfdir') / 'vintf' / 'manifest')
++install_data('android.hardware.media.c2-ffmpeg-extended-seccomp_policy',
++             install_dir : get_option('sysconfdir') / 'seccomp_policy')
+diff --git a/vendor/android.hardware.media.c2-service-ffmpeg.rc b/vendor/android.hardware.media.c2-service-ffmpeg.rc
+new file mode 100644
+index 0000000..37a80af
+--- /dev/null
++++ b/vendor/android.hardware.media.c2-service-ffmpeg.rc
+@@ -0,0 +1,23 @@
++#
++# Copyright 2022 Michael Goffioul <michael.goffioul@gmail.com>
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#      http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++
++service vendor.media.c2.ffmpeg /vendor/bin/hw/android.hardware.media.c2-service-ffmpeg
++    class hal
++    user media
++    # camera: the V4L2 decoder nodes (/dev/video*, /dev/media*) belong to that group
++    group mediadrm drmrpc camera
++    ioprio rt 4
++    task_profiles ProcessCapacityHigh
+-- 
+2.55.0
+
